@@ -188,6 +188,11 @@
     </style>
 </head>
 <body>
+    <script>
+        // Base path for API routes (set by Flask)
+        const BASE_PATH = '{{ base_path }}';
+    </script>
+    
     <div class="container">
         <h1>📝 Text Submission App</h1>
         <p class="subtitle">Submit your text for future LLM analysis</p>
@@ -223,8 +228,8 @@
     </div>
 
     <script>
-        // API base URL - defaults to same origin, can be overridden via environment
-        const API_BASE_URL = window.location.origin;
+        // API base URL with base path support
+        const API_BASE_URL = window.location.origin + BASE_PATH;
         
         const form = document.getElementById('submissionForm');
         const nameInput = document.getElementById('name');

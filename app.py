@@ -6,14 +6,19 @@ import os
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
+# Support for base path (for Insights Hub/MindSphere deployment)
+BASE_PATH = os.environ.get('BASE_PATH', '').rstrip('/')
+
 # Store submissions in memory (in production, use a database)
 submissions = []
 
+@app.route(f'{BASE_PATH}/')
 @app.route('/')
 def index():
     """Render the main UI page"""
-    return render_template('index.html')
+    return render_template('index.html', base_path=BASE_PATH)
 
+@app.route(f'{BASE_PATH}/api/submit', methods=['POST'])
 @app.route('/api/submit', methods=['POST'])
 def submit_text():
     """API endpoint to handle text submissions"""
@@ -49,6 +54,7 @@ def submit_text():
             'error': str(e)
         }), 500
 
+@app.route(f'{BASE_PATH}/api/submissions', methods=['GET'])
 @app.route('/api/submissions', methods=['GET'])
 def get_submissions():
     """API endpoint to retrieve all submissions"""
@@ -58,6 +64,7 @@ def get_submissions():
         'submissions': submissions
     }), 200
 
+@app.route(f'{BASE_PATH}/api/submissions/<int:submission_id>', methods=['GET'])
 @app.route('/api/submissions/<int:submission_id>', methods=['GET'])
 def get_submission(submission_id):
     """API endpoint to retrieve a specific submission"""
@@ -74,6 +81,7 @@ def get_submission(submission_id):
             'error': 'Submission not found'
         }), 404
 
+@app.route(f'{BASE_PATH}/api/health', methods=['GET'])
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""

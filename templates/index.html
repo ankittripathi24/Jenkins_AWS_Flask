@@ -223,6 +223,9 @@
     </div>
 
     <script>
+        // API base URL - defaults to same origin, can be overridden via environment
+        const API_BASE_URL = window.location.origin;
+        
         const form = document.getElementById('submissionForm');
         const nameInput = document.getElementById('name');
         const textInput = document.getElementById('text');
@@ -253,7 +256,7 @@
             submitBtn.textContent = 'Submitting...';
 
             try {
-                const response = await fetch('/api/submit', {
+                const response = await fetch(`${API_BASE_URL}/api/submit`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -293,7 +296,7 @@
         // Load submissions
         async function loadSubmissions() {
             try {
-                const response = await fetch('/api/submissions');
+                const response = await fetch(`${API_BASE_URL}/api/submissions`);
                 const data = await response.json();
 
                 if (data.success && data.submissions.length > 0) {

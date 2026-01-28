@@ -128,10 +128,10 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['assets'] = {'count': 0, 'status': 'error', 'message': f'HTTP {assets_response.status_code}'}
-                errors.append(f'Assets API: {assets_response.status_code}')
+                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets → HTTP {assets_response.status_code}')
         except Exception as e:
             metrics['assets'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'Assets: {str(e)}')
+            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets → {str(e)}')
         
         # 2. Get Agent Count from Asset Manager
         try:
@@ -149,10 +149,10 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['agents'] = {'count': 0, 'status': 'error', 'message': f'HTTP {agents_response.status_code}'}
-                errors.append(f'Agents API: {agents_response.status_code}')
+                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets?filter={{"hasType":{{"in":["core.basicagent"]}}}} → HTTP {agents_response.status_code}')
         except Exception as e:
             metrics['agents'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'Agents: {str(e)}')
+            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets (agents filter) → {str(e)}')
         
         # 3. Get Data Lake Objects Count
         try:
@@ -172,10 +172,10 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['datalake'] = {'objects': 0, 'status': 'error', 'message': f'HTTP {datalake_response.status_code}'}
-                errors.append(f'DataLake API: {datalake_response.status_code}')
+                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/datalake/v3/listObjects?path=/ → HTTP {datalake_response.status_code}')
         except Exception as e:
             metrics['datalake'] = {'objects': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'DataLake: {str(e)}')
+            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/datalake/v3/listObjects?path=/ → {str(e)}')
         
         # 4. Get Event Count
         try:
@@ -193,10 +193,10 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['events'] = {'count': 0, 'status': 'error', 'message': f'HTTP {events_response.status_code}'}
-                errors.append(f'Events API: {events_response.status_code}')
+                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/eventmanagement/v3/events → HTTP {events_response.status_code}')
         except Exception as e:
             metrics['events'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'Events: {str(e)}')
+            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/eventmanagement/v3/events → {str(e)}')
         
         # 5. Get VFC Flows Count
         try:
@@ -214,10 +214,10 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['vfc_flows'] = {'count': 0, 'status': 'error', 'message': f'HTTP {vfc_response.status_code}'}
-                errors.append(f'VFC API: {vfc_response.status_code}')
+                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/visualflowcreator/v3/flows → HTTP {vfc_response.status_code}')
         except Exception as e:
             metrics['vfc_flows'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'VFC: {str(e)}')
+            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/visualflowcreator/v3/flows → {str(e)}')
         
         # 6. Get Dashboard Count
         try:
@@ -235,10 +235,10 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['dashboards'] = {'count': 0, 'status': 'error', 'message': f'HTTP {dashboards_response.status_code}'}
-                errors.append(f'Dashboards API: {dashboards_response.status_code}')
+                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/kpidashboardconfiguration/v3/dashboards → HTTP {dashboards_response.status_code}')
         except Exception as e:
             metrics['dashboards'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'Dashboards: {str(e)}')
+            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/kpidashboardconfiguration/v3/dashboards → {str(e)}')
         
         # 7. Get Rules Count
         try:
@@ -256,10 +256,10 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['rules'] = {'count': 0, 'status': 'error', 'message': f'HTTP {rules_response.status_code}'}
-                errors.append(f'Rules API: {rules_response.status_code}')
+                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/rulesmanagement/v4/rules → HTTP {rules_response.status_code}')
         except Exception as e:
             metrics['rules'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'Rules: {str(e)}')
+            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/rulesmanagement/v4/rules → {str(e)}')
         
         # 8. Get Cases Count (if available)
         try:
@@ -277,10 +277,10 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['cases'] = {'count': 0, 'status': 'error', 'message': f'HTTP {cases_response.status_code}'}
-                errors.append(f'Cases API: {cases_response.status_code}')
+                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/casemanagement/v3/cases → HTTP {cases_response.status_code}')
         except Exception as e:
             metrics['cases'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'Cases: {str(e)}')
+            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/casemanagement/v3/cases → {str(e)}')
         
         # 9. Get Predictions Count (AI/ML)
         try:
@@ -297,10 +297,10 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['predictions'] = {'count': 0, 'status': 'error', 'message': f'HTTP {predictions_response.status_code}'}
-                errors.append(f'Predictions API: {predictions_response.status_code}')
+                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/oipredictapi/v3/predict-assets/all → HTTP {predictions_response.status_code}')
         except Exception as e:
             metrics['predictions'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'Predictions: {str(e)}')
+            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/oipredictapi/v3/predict-assets/all → {str(e)}')
         
         # 10. Get Anomaly Detection Count
         try:
@@ -319,10 +319,10 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['anomaly_detections'] = {'count': 0, 'status': 'error', 'message': f'HTTP {anomaly_response.status_code}'}
-                errors.append(f'Anomaly API: {anomaly_response.status_code}')
+                errors.append(f'GET https://tzppnd3-oipredictui.eu1.mindsphere.io/api/oipredictapi/v3/usageDetails?requestType=ANOMALY → HTTP {anomaly_response.status_code}')
         except Exception as e:
             metrics['anomaly_detections'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'Anomaly: {str(e)}')
+            errors.append(f'GET https://tzppnd3-oipredictui.eu1.mindsphere.io/api/oipredictapi/v3/usageDetails?requestType=ANOMALY → {str(e)}')
         
         return jsonify({
             'success': True,

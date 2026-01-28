@@ -1,0 +1,47 @@
+{
+  "name": "Flask Text Submission App",
+  "version": "1.0.0",
+  "description": "Flask application for text submission and analysis",
+  "endpoints": [
+    {
+      "name": "main",
+      "type": "ui",
+      "path": "/",
+      "methods": ["GET"],
+      "public": true
+    },
+    {
+      "name": "submit_api",
+      "type": "api",
+      "path": "/api/submit",
+      "methods": ["POST"],
+      "public": true
+    },
+    {
+      "name": "submissions_api",
+      "type": "api",
+      "path": "/api/submissions",
+      "methods": ["GET"],
+      "public": true
+    },
+    {
+      "name": "submission_detail_api",
+      "type": "api",
+      "path": "/api/submissions/*",
+      "methods": ["GET"],
+      "public": true
+    },
+    {
+      "name": "health_api",
+      "type": "api",
+      "path": "/api/health",
+      "methods": ["GET"],
+      "public": true
+    }
+  ],
+  "proxyTimeout": 120000,
+  "runtime": {
+    "type": "python",
+    "version": "3.12"
+  }
+}

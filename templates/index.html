@@ -240,6 +240,13 @@
         const submissionsList = document.getElementById('submissionsList');
         const submissionsCount = document.getElementById('submissionsCount');
 
+        // Get CSRF token from cookies (for Insights Hub/MindSphere)
+        function getCsrfToken() {
+            const name = 'XSRF-TOKEN';
+            const value = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+            return value ? decodeURIComponent(value.pop()) : null;
+        }
+
         // Character counter
         textInput.addEventListener('input', () => {
             charCount.textContent = textInput.value.length;
@@ -261,11 +268,20 @@
             submitBtn.textContent = 'Submitting...';
 
             try {
+                const csrfToken = getCsrfToken();
+                const headers = {
+                    'Content-Type': 'application/json',
+                };
+                
+                // Add CSRF token if available (for Insights Hub/MindSphere)
+                if (csrfToken) {
+                    headers['X-XSRF-TOKEN'] = csrfToken;
+                }
+
                 const response = await fetch(`${API_BASE_URL}/api/submit`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: headers,
+                    credentials: 'same-origin',
                     body: JSON.stringify({ name, text })
                 });
 

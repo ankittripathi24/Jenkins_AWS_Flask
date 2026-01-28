@@ -10,8 +10,8 @@ CORS(app)  # Enable CORS for all routes
 # Support for base path (for Insights Hub/MindSphere deployment)
 BASE_PATH = os.environ.get('BASE_PATH', '').rstrip('/')
 
-# Insights Hub API base URL (update if different)
-INSIGHTS_HUB_API_BASE = os.environ.get('INSIGHTS_HUB_API_BASE', 'https://gateway.eu1.mindsphere.io')
+# Insights Hub API base URL - Gateway endpoint
+INSIGHTS_HUB_API_BASE = 'https://gateway.eu1.mindsphere.io'
 
 # Store submissions in memory (in production, use a database)
 submissions = []
@@ -19,7 +19,13 @@ submissions = []
 @app.route(f'{BASE_PATH}/')
 @app.route('/')
 def index():
-    """Render the main UI page"""
+    """Render the main dashboard page"""
+    return render_template('dashboard.html', base_path=BASE_PATH)
+
+@app.route(f'{BASE_PATH}/text-submission')
+@app.route('/text-submission')
+def text_submission():
+    """Render the text submission page"""
     return render_template('index.html', base_path=BASE_PATH)
 
 @app.route(f'{BASE_PATH}/api/submit', methods=['POST'])
@@ -84,6 +90,252 @@ def get_submission(submission_id):
             'success': False,
             'error': 'Submission not found'
         }), 404
+
+@app.route(f'{BASE_PATH}/api/insights-hub/dashboard-metrics', methods=['GET'])
+@app.route('/api/insights-hub/dashboard-metrics', methods=['GET'])
+def get_dashboard_metrics():
+    """Fetch comprehensive metrics from Insights Hub tenant"""
+    try:
+        auth_header = request.headers.get('Authorization')
+        
+        if not auth_header:
+            return jsonify({
+                'success': False,
+                'error': 'No authorization token provided'
+            }), 401
+        
+        headers = {
+            'Authorization': auth_header,
+            'Content-Type': 'application/json'
+        }
+        
+        metrics = {}
+        errors = []
+        
+        # 1. Get Asset Count
+        try:
+            assets_response = requests.get(
+                f'{INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets',
+                headers=headers,
+                params={'size': 1},
+                timeout=30
+            )
+            if assets_response.status_code == 200:
+                assets_data = assets_response.json()
+                metrics['assets'] = {
+                    'count': assets_data.get('page', {}).get('totalElements', 0),
+                    'status': 'success'
+                }
+            else:
+                metrics['assets'] = {'count': 0, 'status': 'error', 'message': f'HTTP {assets_response.status_code}'}
+                errors.append(f'Assets API: {assets_response.status_code}')
+        except Exception as e:
+            metrics['assets'] = {'count': 0, 'status': 'error', 'message': str(e)}
+            errors.append(f'Assets: {str(e)}')
+        
+        # 2. Get Agent Count from Asset Manager
+        try:
+            agents_response = requests.get(
+                f'{INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets',
+                headers=headers,
+                params={'filter': '{"typeId":{"contains":"core.mclib.agent"}}', 'size': 1},
+                timeout=30
+            )
+            if agents_response.status_code == 200:
+                agents_data = agents_response.json()
+                metrics['agents'] = {
+                    'count': agents_data.get('page', {}).get('totalElements', 0),
+                    'status': 'success'
+                }
+            else:
+                metrics['agents'] = {'count': 0, 'status': 'error', 'message': f'HTTP {agents_response.status_code}'}
+                errors.append(f'Agents API: {agents_response.status_code}')
+        except Exception as e:
+            metrics['agents'] = {'count': 0, 'status': 'error', 'message': str(e)}
+            errors.append(f'Agents: {str(e)}')
+        
+        # 3. Get Data Lake Objects Count
+        try:
+            datalake_response = requests.get(
+                f'{INSIGHTS_HUB_API_BASE}/api/datalake/v3/objects',
+                headers=headers,
+                params={'size': 1},
+                timeout=30
+            )
+            if datalake_response.status_code == 200:
+                datalake_data = datalake_response.json()
+                total_objects = datalake_data.get('page', {}).get('totalElements', 0)
+                # Try to get size info if available
+                metrics['datalake'] = {
+                    'objects': total_objects,
+                    'status': 'success'
+                }
+            else:
+                metrics['datalake'] = {'objects': 0, 'status': 'error', 'message': f'HTTP {datalake_response.status_code}'}
+                errors.append(f'DataLake API: {datalake_response.status_code}')
+        except Exception as e:
+            metrics['datalake'] = {'objects': 0, 'status': 'error', 'message': str(e)}
+            errors.append(f'DataLake: {str(e)}')
+        
+        # 4. Get Event Count
+        try:
+            events_response = requests.get(
+                f'{INSIGHTS_HUB_API_BASE}/api/eventmanagement/v3/events',
+                headers=headers,
+                params={'size': 1},
+                timeout=30
+            )
+            if events_response.status_code == 200:
+                events_data = events_response.json()
+                metrics['events'] = {
+                    'count': events_data.get('page', {}).get('totalElements', 0),
+                    'status': 'success'
+                }
+            else:
+                metrics['events'] = {'count': 0, 'status': 'error', 'message': f'HTTP {events_response.status_code}'}
+                errors.append(f'Events API: {events_response.status_code}')
+        except Exception as e:
+            metrics['events'] = {'count': 0, 'status': 'error', 'message': str(e)}
+            errors.append(f'Events: {str(e)}')
+        
+        # 5. Get VFC Flows Count
+        try:
+            vfc_response = requests.get(
+                f'{INSIGHTS_HUB_API_BASE}/api/visualflowcreator/v3/flows',
+                headers=headers,
+                params={'size': 1},
+                timeout=30
+            )
+            if vfc_response.status_code == 200:
+                vfc_data = vfc_response.json()
+                metrics['vfc_flows'] = {
+                    'count': vfc_data.get('page', {}).get('totalElements', 0),
+                    'status': 'success'
+                }
+            else:
+                metrics['vfc_flows'] = {'count': 0, 'status': 'error', 'message': f'HTTP {vfc_response.status_code}'}
+                errors.append(f'VFC API: {vfc_response.status_code}')
+        except Exception as e:
+            metrics['vfc_flows'] = {'count': 0, 'status': 'error', 'message': str(e)}
+            errors.append(f'VFC: {str(e)}')
+        
+        # 6. Get Dashboard Count
+        try:
+            dashboards_response = requests.get(
+                f'{INSIGHTS_HUB_API_BASE}/api/kpidashboardconfiguration/v3/dashboards',
+                headers=headers,
+                params={'size': 1},
+                timeout=30
+            )
+            if dashboards_response.status_code == 200:
+                dashboards_data = dashboards_response.json()
+                metrics['dashboards'] = {
+                    'count': dashboards_data.get('page', {}).get('totalElements', 0),
+                    'status': 'success'
+                }
+            else:
+                metrics['dashboards'] = {'count': 0, 'status': 'error', 'message': f'HTTP {dashboards_response.status_code}'}
+                errors.append(f'Dashboards API: {dashboards_response.status_code}')
+        except Exception as e:
+            metrics['dashboards'] = {'count': 0, 'status': 'error', 'message': str(e)}
+            errors.append(f'Dashboards: {str(e)}')
+        
+        # 7. Get Rules Count
+        try:
+            rules_response = requests.get(
+                f'{INSIGHTS_HUB_API_BASE}/api/eventmanagement/v3/rules',
+                headers=headers,
+                params={'size': 1},
+                timeout=30
+            )
+            if rules_response.status_code == 200:
+                rules_data = rules_response.json()
+                metrics['rules'] = {
+                    'count': rules_data.get('page', {}).get('totalElements', 0),
+                    'status': 'success'
+                }
+            else:
+                metrics['rules'] = {'count': 0, 'status': 'error', 'message': f'HTTP {rules_response.status_code}'}
+                errors.append(f'Rules API: {rules_response.status_code}')
+        except Exception as e:
+            metrics['rules'] = {'count': 0, 'status': 'error', 'message': str(e)}
+            errors.append(f'Rules: {str(e)}')
+        
+        # 8. Get Cases Count (if available)
+        try:
+            cases_response = requests.get(
+                f'{INSIGHTS_HUB_API_BASE}/api/casemanagement/v1/cases',
+                headers=headers,
+                params={'size': 1},
+                timeout=30
+            )
+            if cases_response.status_code == 200:
+                cases_data = cases_response.json()
+                metrics['cases'] = {
+                    'count': cases_data.get('totalElements', 0),
+                    'status': 'success'
+                }
+            else:
+                metrics['cases'] = {'count': 0, 'status': 'error', 'message': f'HTTP {cases_response.status_code}'}
+                errors.append(f'Cases API: {cases_response.status_code}')
+        except Exception as e:
+            metrics['cases'] = {'count': 0, 'status': 'error', 'message': str(e)}
+            errors.append(f'Cases: {str(e)}')
+        
+        # 9. Get Predictions Count (AI/ML)
+        try:
+            predictions_response = requests.get(
+                f'{INSIGHTS_HUB_API_BASE}/api/aimodel/v3/models',
+                headers=headers,
+                params={'size': 1},
+                timeout=30
+            )
+            if predictions_response.status_code == 200:
+                predictions_data = predictions_response.json()
+                metrics['predictions'] = {
+                    'count': predictions_data.get('page', {}).get('totalElements', 0),
+                    'status': 'success'
+                }
+            else:
+                metrics['predictions'] = {'count': 0, 'status': 'error', 'message': f'HTTP {predictions_response.status_code}'}
+                errors.append(f'Predictions API: {predictions_response.status_code}')
+        except Exception as e:
+            metrics['predictions'] = {'count': 0, 'status': 'error', 'message': str(e)}
+            errors.append(f'Predictions: {str(e)}')
+        
+        # 10. Get Anomaly Detection Count
+        try:
+            anomaly_response = requests.get(
+                f'{INSIGHTS_HUB_API_BASE}/api/anomalydetection/v3/detectionmodels',
+                headers=headers,
+                params={'size': 1},
+                timeout=30
+            )
+            if anomaly_response.status_code == 200:
+                anomaly_data = anomaly_response.json()
+                metrics['anomaly_detections'] = {
+                    'count': anomaly_data.get('page', {}).get('totalElements', 0),
+                    'status': 'success'
+                }
+            else:
+                metrics['anomaly_detections'] = {'count': 0, 'status': 'error', 'message': f'HTTP {anomaly_response.status_code}'}
+                errors.append(f'Anomaly API: {anomaly_response.status_code}')
+        except Exception as e:
+            metrics['anomaly_detections'] = {'count': 0, 'status': 'error', 'message': str(e)}
+            errors.append(f'Anomaly: {str(e)}')
+        
+        return jsonify({
+            'success': True,
+            'metrics': metrics,
+            'errors': errors if errors else None,
+            'timestamp': datetime.now().isoformat()
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Internal server error: {str(e)}'
+        }), 500
 
 @app.route(f'{BASE_PATH}/api/insights-hub/assets', methods=['GET'])
 @app.route('/api/insights-hub/assets', methods=['GET'])

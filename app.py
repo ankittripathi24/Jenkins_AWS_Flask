@@ -10,8 +10,8 @@ CORS(app)  # Enable CORS for all routes
 # Support for base path (for Insights Hub/MindSphere deployment)
 BASE_PATH = os.environ.get('BASE_PATH', '').rstrip('/')
 
-# Insights Hub API base URL - Tenant-specific endpoint
-INSIGHTS_HUB_API_BASE = 'https://tzppnd3-oipredictui.eu1.mindsphere.io'
+# Insights Hub API base URL - Gateway endpoint
+INSIGHTS_HUB_API_BASE = 'https://gateway.eu1.mindsphere.io'
 
 # Store submissions in memory (in production, use a database)
 submissions = []
@@ -304,9 +304,9 @@ def get_dashboard_metrics():
         
         # 10. Get Anomaly Detection Count
         try:
-            # Note: Using specific tenant host for oipredictapi
+            # Note: Using gateway endpoint for oipredictapi
             anomaly_response = requests.get(
-                'https://tzppnd3-oipredictui.eu1.mindsphere.io/api/oipredictapi/v3/usageDetails',
+                'https://gateway.eu1.mindsphere.io/api/oipredictapi/v3/usageDetails',
                 headers=headers,
                 params={'requestType': 'ANOMALY'},
                 timeout=30
@@ -319,10 +319,10 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['anomaly_detections'] = {'count': 0, 'status': 'error', 'message': f'HTTP {anomaly_response.status_code}'}
-                errors.append(f'GET https://tzppnd3-oipredictui.eu1.mindsphere.io/api/oipredictapi/v3/usageDetails?requestType=ANOMALY → HTTP {anomaly_response.status_code}')
+                errors.append(f'GET https://gateway.eu1.mindsphere.io/api/oipredictapi/v3/usageDetails?requestType=ANOMALY → HTTP {anomaly_response.status_code}')
         except Exception as e:
             metrics['anomaly_detections'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET https://tzppnd3-oipredictui.eu1.mindsphere.io/api/oipredictapi/v3/usageDetails?requestType=ANOMALY → {str(e)}')
+            errors.append(f'GET https://gateway.eu1.mindsphere.io/api/oipredictapi/v3/usageDetails?requestType=ANOMALY → {str(e)}')
         
         return jsonify({
             'success': True,

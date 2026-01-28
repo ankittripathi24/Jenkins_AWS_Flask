@@ -10,8 +10,8 @@ CORS(app)  # Enable CORS for all routes
 # Support for base path (for Insights Hub/MindSphere deployment)
 BASE_PATH = os.environ.get('BASE_PATH', '').rstrip('/')
 
-# Insights Hub API base URL - Gateway endpoint
-INSIGHTS_HUB_API_BASE = 'https://gateway.eu1.mindsphere.io'
+# Insights Hub API base URL - Tenant-specific endpoint
+INSIGHTS_HUB_API_BASE = 'https://tzppnd3-oipredictui.eu1.mindsphere.io'
 
 # Store submissions in memory (in production, use a database)
 submissions = []

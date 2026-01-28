@@ -138,7 +138,7 @@ def get_dashboard_metrics():
             agents_response = requests.get(
                 f'{INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets',
                 headers=headers,
-                params={'filter': '{"typeId":{"contains":"core.mclib.agent"}}', 'size': 1},
+                params={'filter': '{"hasType":{"in":["core.basicagent"]}}', 'page': 1000000, 'size': 200},
                 timeout=30
             )
             if agents_response.status_code == 200:
@@ -157,9 +157,9 @@ def get_dashboard_metrics():
         # 3. Get Data Lake Objects Count
         try:
             datalake_response = requests.get(
-                f'{INSIGHTS_HUB_API_BASE}/api/datalake/v3/objects',
+                f'{INSIGHTS_HUB_API_BASE}/api/datalake/v3/listObjects',
                 headers=headers,
-                params={'size': 1},
+                params={'path': '/', 'size': 1},
                 timeout=30
             )
             if datalake_response.status_code == 200:
@@ -243,7 +243,7 @@ def get_dashboard_metrics():
         # 7. Get Rules Count
         try:
             rules_response = requests.get(
-                f'{INSIGHTS_HUB_API_BASE}/api/eventmanagement/v3/rules',
+                f'{INSIGHTS_HUB_API_BASE}/api/rulesmanagement/v4/rules',
                 headers=headers,
                 params={'size': 1},
                 timeout=30
@@ -264,7 +264,7 @@ def get_dashboard_metrics():
         # 8. Get Cases Count (if available)
         try:
             cases_response = requests.get(
-                f'{INSIGHTS_HUB_API_BASE}/api/casemanagement/v1/cases',
+                f'{INSIGHTS_HUB_API_BASE}/api/casemanagement/v3/cases',
                 headers=headers,
                 params={'size': 1},
                 timeout=30
@@ -285,9 +285,8 @@ def get_dashboard_metrics():
         # 9. Get Predictions Count (AI/ML)
         try:
             predictions_response = requests.get(
-                f'{INSIGHTS_HUB_API_BASE}/api/aimodel/v3/models',
+                f'{INSIGHTS_HUB_API_BASE}/api/oipredictapi/v3/predict-assets/all',
                 headers=headers,
-                params={'size': 1},
                 timeout=30
             )
             if predictions_response.status_code == 200:
@@ -305,10 +304,11 @@ def get_dashboard_metrics():
         
         # 10. Get Anomaly Detection Count
         try:
+            # Note: Using specific tenant host for oipredictapi
             anomaly_response = requests.get(
-                f'{INSIGHTS_HUB_API_BASE}/api/anomalydetection/v3/detectionmodels',
+                'https://tzppnd3-oipredictui.eu1.mindsphere.io/api/oipredictapi/v3/usageDetails',
                 headers=headers,
-                params={'size': 1},
+                params={'requestType': 'ANOMALY'},
                 timeout=30
             )
             if anomaly_response.status_code == 200:

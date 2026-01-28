@@ -216,6 +216,15 @@
             <button type="submit" id="submitBtn">Submit Text</button>
         </form>
 
+        <!-- Insights Hub API Test Section -->
+        <div class="submissions-section" style="border-top: 2px solid #e0e0e0; padding-top: 30px; margin-top: 30px;">
+            <div class="submissions-title">
+                <h2>🔧 Insights Hub API Test</h2>
+            </div>
+            <button type="button" id="fetchAssetsBtn" style="margin-bottom: 20px;">Fetch Assets from Insights Hub</button>
+            <div id="assetsResult" style="background: #f8f9fa; border-radius: 8px; padding: 15px; min-height: 50px; font-family: monospace; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;"></div>
+        </div>
+
         <div class="submissions-section">
             <div class="submissions-title">
                 <h2>Recent Submissions</h2>
@@ -341,6 +350,36 @@
                 console.error('Error loading submissions:', error);
             }
         }
+
+        // Fetch assets from Insights Hub
+        const fetchAssetsBtn = document.getElementById('fetchAssetsBtn');
+        const assetsResult = document.getElementById('assetsResult');
+
+        fetchAssetsBtn.addEventListener('click', async () => {
+            fetchAssetsBtn.disabled = true;
+            fetchAssetsBtn.textContent = 'Fetching...';
+            assetsResult.textContent = 'Loading assets from Insights Hub...';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/insights-hub/assets?size=5`, {
+                    method: 'GET',
+                    credentials: 'same-origin',
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    assetsResult.textContent = JSON.stringify(data.data, null, 2);
+                } else {
+                    assetsResult.textContent = `Error: ${data.error}\n\nDetails: ${data.details || 'No additional details'}`;
+                }
+            } catch (error) {
+                assetsResult.textContent = `Network Error: ${error.message}`;
+            } finally {
+                fetchAssetsBtn.disabled = false;
+                fetchAssetsBtn.textContent = 'Fetch Assets from Insights Hub';
+            }
+        });
 
         // Escape HTML to prevent XSS
         function escapeHtml(text) {

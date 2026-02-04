@@ -186,13 +186,15 @@ def get_dashboard_metrics():
             events_response = requests.get(
                 f'{INSIGHTS_HUB_API_BASE}/api/eventmanagement/v3/events',
                 headers=headers,
-                params={'size': 1},
+                params={'size': 1000},
                 timeout=30
             )
             if events_response.status_code == 200:
                 events_data = events_response.json()
+                # API returns direct array of events: [{...}, {...}]
+                event_count = len(events_data) if isinstance(events_data, list) else 0
                 metrics['events'] = {
-                    'count': events_data.get('page', {}).get('totalElements', 0),
+                    'count': event_count,
                     'status': 'success'
                 }
             else:

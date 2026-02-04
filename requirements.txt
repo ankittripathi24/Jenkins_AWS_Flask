@@ -3,3 +3,4 @@ Flask-Cors==4.0.0
 gunicorn==21.2.0
 Werkzeug==3.0.1
 requests==2.31.0
+mindsphere-python-sdk==1.0.0

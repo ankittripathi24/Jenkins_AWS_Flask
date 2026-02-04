@@ -159,13 +159,17 @@ def get_dashboard_metrics():
             datalake_response = requests.get(
                 f'{INSIGHTS_HUB_API_BASE}/api/datalake/v3/listObjects',
                 headers=headers,
-                params={'path': '/', 'size': 1},
+                params={'path': '/', 'size': 1000},
                 timeout=30
             )
             if datalake_response.status_code == 200:
                 datalake_data = datalake_response.json()
-                total_objects = datalake_data.get('page', {}).get('totalElements', 0)
-                # Try to get size info if available
+                # API returns: {"objects": {"files": [], "folders": []}}
+                objects_data = datalake_data.get('objects', {})
+                files_count = len(objects_data.get('files', []))
+                folders_count = len(objects_data.get('folders', []))
+                total_objects = files_count + folders_count
+                
                 metrics['datalake'] = {
                     'objects': total_objects,
                     'status': 'success'

@@ -183,13 +183,19 @@ def get_dashboard_metrics():
         
         # 4. Get Event Count
         try:
+            # API defaults to last 7 days if no timestamp filter provided
+            # Query last 365 days to get all events
+            from datetime import timedelta
+            one_year_ago = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+            
             events_response = requests.get(
                 f'{INSIGHTS_HUB_API_BASE}/api/eventmanagement/v3/events',
                 headers=headers,
                 params={
                     'size': 1,
+                    'filter': f'{{"timestamp":{{"after":"{one_year_ago}"}}}}',
                     'history': 'true',  # Include historical events
-                    'includeShared': 'true'  # Include shared events
+                    'includeShared': 'false'  # Only tenant's own events
                 },
                 timeout=30
             )

@@ -186,7 +186,11 @@ def get_dashboard_metrics():
             events_response = requests.get(
                 f'{INSIGHTS_HUB_API_BASE}/api/eventmanagement/v3/events',
                 headers=headers,
-                params={'size': 1},
+                params={
+                    'size': 1,
+                    'history': 'true',  # Include historical events
+                    'includeShared': 'true'  # Include shared events
+                },
                 timeout=30
             )
             if events_response.status_code == 200:

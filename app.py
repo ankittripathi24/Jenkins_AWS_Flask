@@ -4,16 +4,6 @@ from datetime import datetime
 import os
 import requests
 
-# Import MindSphere Python SDK
-try:
-    from mindsphere_python_sdk.core import UserToken
-    from mindsphere_python_sdk.asset_management import AssetManagementClient
-    from mindsphere_python_sdk.event_management import EventManagementClient
-    SDK_AVAILABLE = True
-except ImportError:
-    SDK_AVAILABLE = False
-    print("Warning: mindsphere_python_sdk not installed. Using requests fallback.")
-
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
@@ -101,16 +91,10 @@ def get_submission(submission_id):
             'error': 'Submission not found'
         }), 404
 
-def get_sdk_credentials(auth_header):
-    """Helper function to create SDK credentials from authorization header"""
-    if SDK_AVAILABLE and auth_header:
-        return UserToken(authorization=auth_header)
-    return None
-
 @app.route(f'{BASE_PATH}/api/insights-hub/dashboard-metrics', methods=['GET'])
 @app.route('/api/insights-hub/dashboard-metrics', methods=['GET'])
 def get_dashboard_metrics():
-    """Fetch comprehensive metrics from Insights Hub tenant using SDK"""
+    """Fetch comprehensive metrics from Insights Hub tenant"""
     try:
         auth_header = request.headers.get('Authorization')
         
@@ -120,9 +104,6 @@ def get_dashboard_metrics():
                 'error': 'No authorization token provided'
             }), 401
         
-        # Try to use SDK if available, otherwise fall back to requests
-        credentials = get_sdk_credentials(auth_header)
-        
         headers = {
             'Authorization': auth_header,
             'Content-Type': 'application/json'
@@ -131,35 +112,23 @@ def get_dashboard_metrics():
         metrics = {}
         errors = []
         
-        # 1. Get Asset Count (using SDK if available)
+        # 1. Get Asset Count
         try:
-            if SDK_AVAILABLE and credentials:
-                # Use SDK
-                asset_client = AssetManagementClient(mindsphere_credentials=credentials)
-                assets_data = asset_client.get_assets(page=0, size=1)
+            assets_response = requests.get(
+                f'{INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets',
+                headers=headers,
+                params={'size': 1},
+                timeout=30
+            )
+            if assets_response.status_code == 200:
+                assets_data = assets_response.json()
                 metrics['assets'] = {
-                    'count': assets_data.get('page', {}).get('totalElements', 0) if isinstance(assets_data, dict) else len(assets_data),
-                    'status': 'success',
-                    'method': 'SDK'
+                    'count': assets_data.get('page', {}).get('totalElements', 0),
+                    'status': 'success'
                 }
             else:
-                # Fall back to requests
-                assets_response = requests.get(
-                    f'{INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets',
-                    headers=headers,
-                    params={'size': 1},
-                    timeout=30
-                )
-                if assets_response.status_code == 200:
-                    assets_data = assets_response.json()
-                    metrics['assets'] = {
-                        'count': assets_data.get('page', {}).get('totalElements', 0),
-                        'status': 'success',
-                        'method': 'REST'
-                    }
-                else:
-                    metrics['assets'] = {'count': 0, 'status': 'error', 'message': f'HTTP {assets_response.status_code}'}
-                    errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets → HTTP {assets_response.status_code}')
+                metrics['assets'] = {'count': 0, 'status': 'error', 'message': f'HTTP {assets_response.status_code}'}
+                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets → HTTP {assets_response.status_code}')
         except Exception as e:
             metrics['assets'] = {'count': 0, 'status': 'error', 'message': str(e)}
             errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets → {str(e)}')
@@ -371,41 +340,10 @@ def get_dashboard_metrics():
 @app.route(f'{BASE_PATH}/api/insights-hub/assets', methods=['GET'])
 @app.route('/api/insights-hub/assets', methods=['GET'])
 def get_insights_hub_assets():
-    """Proxy endpoint to fetch assets from Insights Hub using SDK or REST API"""
+    """Proxy endpoint to fetch assets from Insights Hub Asset Management API"""
     try:
-        # 1. Extract the token forwarded by the Gateway
-        user_auth_header = request.headers.get('Authorization')
-        
-        if not user_auth_header:
-            return jsonify({
-                'success': False,
-                'error': 'No authorization header found'
-            }), 401
-        
-        # 2. Try to use SDK if available
-        if SDK_AVAILABLE:
-            try:
-                # Initialize the client using the User's Token
-                credentials = UserToken(authorization=user_auth_header)
-                asset_client = AssetManagementClient(mindsphere_credentials=credentials)
-                
-                # Get query parameters
-                size = int(request.args.get('size', 10))
-                page = int(request.args.get('page', 0))
-                
-                # 3. Call the SDK method
-                assets_data = asset_client.get_assets(page=page, size=size)
-                
-                return jsonify({
-                    'success': True,
-                    'data': assets_data,
-                    'method': 'SDK'
-                }), 200
-            except Exception as sdk_error:
-                # If SDK fails, fall through to REST API
-                pass
-        
-        # Fallback to REST API
+        # Get authorization token from request headers (passed through by gateway)
+        auth_header = request.headers.get('Authorization')
         # Insights Hub Asset Management API endpoint
         api_url = f'{INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets'
         
@@ -431,8 +369,7 @@ def get_insights_hub_assets():
         if response.status_code == 200:
             return jsonify({
                 'success': True,
-                'data': response.json(),
-                'method': 'REST'
+                'data': response.json()
             }), 200
         else:
             return jsonify({

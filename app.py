@@ -3,6 +3,7 @@ from flask_cors import CORS
 from datetime import datetime
 import os
 import requests
+import json
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -15,6 +16,60 @@ INSIGHTS_HUB_API_BASE = 'https://gateway.eu1.mindsphere.io'
 
 # Store submissions in memory (in production, use a database)
 submissions = []
+
+# Request interceptor to log caller information
+@app.before_request
+def log_request_info():
+    """Log information about incoming requests"""
+    print("=" * 60)
+    print(f"INCOMING REQUEST at {datetime.now().isoformat()}")
+    print("=" * 60)
+    print(f"Method: {request.method}")
+    print(f"Path: {request.path}")
+    print(f"Full URL: {request.url}")
+    print(f"Remote IP: {request.remote_addr}")
+    
+    # Check for forwarded IP (when behind proxy/gateway)
+    forwarded_for = request.headers.get('X-Forwarded-For')
+    if forwarded_for:
+        print(f"X-Forwarded-For: {forwarded_for}")
+    
+    real_ip = request.headers.get('X-Real-IP')
+    if real_ip:
+        print(f"X-Real-IP: {real_ip}")
+    
+    print(f"User-Agent: {request.headers.get('User-Agent', 'Not provided')}")
+    
+    # Log authorization info (without exposing full token)
+    auth_header = request.headers.get('Authorization')
+    if auth_header:
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]
+            # Show first and last 10 chars of token for identification
+            masked_token = f"{token[:10]}...{token[-10:]}" if len(token) > 20 else "***"
+            print(f"Authorization: Bearer {masked_token}")
+        else:
+            print(f"Authorization: {auth_header[:20]}...")
+    
+    # Log Insights Hub specific headers
+    tenant = request.headers.get('X-MindSphere-Tenant')
+    if tenant:
+        print(f"Tenant: {tenant}")
+    
+    user = request.headers.get('X-MindSphere-User')
+    if user:
+        print(f"User: {user}")
+    
+    # Log all headers (for debugging)
+    print("-" * 40)
+    print("All Headers:")
+    for header, value in request.headers:
+        # Mask sensitive headers
+        if header.lower() in ['authorization', 'cookie', 'x-xsrf-token']:
+            print(f"  {header}: ***masked***")
+        else:
+            print(f"  {header}: {value}")
+    print("=" * 60)
 
 @app.route(f'{BASE_PATH}/')
 @app.route('/')

@@ -238,8 +238,18 @@
             try {
                 const response = await fetch(`${API_BASE_URL}/api/insights-hub/dashboard-metrics`, {
                     method: 'GET',
-                    credentials: 'same-origin',
+                    credentials: 'include',
+                    headers: {
+                        'Accept': 'application/json'
+                    }
                 });
+
+                console.log('Response status:', response.status);
+                console.log('Response headers:', [...response.headers.entries()]);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
 
                 const data = await response.json();
 
@@ -280,15 +290,18 @@
                     metricsGrid.innerHTML = `
                         <div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #dc3545; background: white; border-radius: 15px;">
                             <h2>❌ Failed to load metrics</h2>
-                            <p>${data.error}</p>
+                            <p><strong>Error:</strong> ${data.error || 'Unknown error'}</p>
+                            <pre style="text-align: left; background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 15px; font-size: 12px; overflow-x: auto;">${JSON.stringify(data, null, 2)}</pre>
                         </div>
                     `;
                 }
             } catch (error) {
+                console.error('Fetch error:', error);
                 metricsGrid.innerHTML = `
                     <div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #dc3545; background: white; border-radius: 15px;">
                         <h2>❌ Network Error</h2>
-                        <p>${error.message}</p>
+                        <p><strong>Message:</strong> ${error.message}</p>
+                        <p style="font-size: 12px; color: #6c757d; margin-top: 10px;">Check browser console (F12) for details</p>
                     </div>
                 `;
             } finally {

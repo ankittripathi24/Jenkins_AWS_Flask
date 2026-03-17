@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import requests
 import json
@@ -240,7 +240,6 @@ def get_dashboard_metrics():
         try:
             # API defaults to last 7 days if no timestamp filter provided
             # Query last 365 days to get all events
-            from datetime import timedelta
             one_year_ago = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
             
             events_response = requests.get(

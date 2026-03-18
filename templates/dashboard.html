@@ -15,7 +15,13 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
+        }
+
+        /* OS Bar compatible wrapper */
+        #_mdspcontent {
             padding: 20px;
+            min-height: calc(100vh - 48px); /* Account for OS Bar height */
+            position: relative;
         }
 
         .header {
@@ -173,14 +179,15 @@
     </style>
 </head>
 <body>
-    <script>
-        const BASE_PATH = '{{ base_path }}';
-    </script>
+    <div id="_mdspcontent" class="_mdspcontent">
+        <script>
+            const BASE_PATH = '{{ base_path }}';
+        </script>
 
-    <div class="header">
-        <h1>🏢 Insights Hub Tenant Dashboard</h1>
-        <p>Real-time metrics and analytics for your tenant</p>
-    </div>
+        <div class="header">
+            <h1>🏢 Insights Hub Tenant Dashboard</h1>
+            <p>Real-time metrics and analytics for your tenant</p>
+        </div>
 
     <div class="dashboard">
         <div class="refresh-section">
@@ -313,6 +320,17 @@
 
         // Auto-load on page load
         window.addEventListener('load', loadMetrics);
+    </script>
+    </div><!-- End of _mdspcontent -->
+
+    <!-- MindSphere OS Bar -->
+    <script src="https://static.eu1.mindsphere.io/osbar/v4/js/main.min.js"></script>
+    <script>
+        _mdsp.init({
+            title: "Tenant Dashboard",
+            appId: "_mdspcontent",
+            appInfoPath: BASE_PATH + "/app-info.json"
+        });
     </script>
 </body>
 </html>

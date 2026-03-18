@@ -1,11 +1,11 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_cors import CORS
 from datetime import datetime, timedelta
 import os
 import requests
 import json
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static', static_url_path='/static')
 CORS(app)  # Enable CORS for all routes
 
 # Support for base path (for Insights Hub/MindSphere deployment)
@@ -76,6 +76,12 @@ def log_request_info():
 def index():
     """Render the main dashboard page"""
     return render_template('dashboard.html', base_path=BASE_PATH)
+
+@app.route(f'{BASE_PATH}/app-info.json')
+@app.route('/app-info.json')
+def app_info():
+    """Serve app-info.json for OS Bar"""
+    return send_from_directory(app.static_folder, 'app-info.json')
 
 @app.route(f'{BASE_PATH}/text-submission')
 @app.route('/text-submission')

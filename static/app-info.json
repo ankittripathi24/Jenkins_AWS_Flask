@@ -1,0 +1,22 @@
+{
+  "displayName": "Tenant Dashboard",
+  "appVersion": "1.0.0",
+  "appCopyright": "© Siemens 2026",
+  "documentation": {
+    "default": "https://documentation.mindsphere.io/"
+  },
+  "links": {
+    "default": [
+      {
+        "type": "WWW",
+        "name": "Third-Party Software",
+        "value": "https://sie.ag/thirdparty"
+      },
+      {
+        "type": "MAIL",
+        "name": "Support",
+        "value": "support@example.com"
+      }
+    ]
+  }
+}

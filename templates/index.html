@@ -15,10 +15,16 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
+        }
+
+        /* OS Bar compatible wrapper */
+        #_mdspcontent {
             display: flex;
             justify-content: center;
             align-items: center;
             padding: 20px;
+            min-height: calc(100vh - 48px); /* Account for OS Bar height */
+            position: relative;
         }
 
         .container {
@@ -188,12 +194,13 @@
     </style>
 </head>
 <body>
-    <script>
-        // Base path for API routes (set by Flask)
-        const BASE_PATH = '{{ base_path }}';
-    </script>
+    <div id="_mdspcontent" class="_mdspcontent">
+        <script>
+            // Base path for API routes (set by Flask)
+            const BASE_PATH = '{{ base_path }}';
+        </script>
     
-    <div class="container">
+        <div class="container">
         <h1>📝 Text Submission App</h1>
         <p class="subtitle">Submit your text for future LLM analysis</p>
 
@@ -396,6 +403,17 @@
 
         // Load submissions on page load
         loadSubmissions();
+    </script>
+    </div><!-- End of _mdspcontent -->
+
+    <!-- MindSphere OS Bar -->
+    <script src="https://static.eu1.mindsphere.io/osbar/v4/js/main.min.js"></script>
+    <script>
+        _mdsp.init({
+            title: "Text Submission",
+            appId: "_mdspcontent",
+            appInfoPath: BASE_PATH + "/app-info.json"
+        });
     </script>
 </body>
 </html>

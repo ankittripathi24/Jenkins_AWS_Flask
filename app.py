@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_from_directory, g
 from flask_cors import CORS
 from datetime import datetime, timedelta
 import os
@@ -11,19 +11,39 @@ CORS(app)  # Enable CORS for all routes
 # Support for base path (for Insights Hub/MindSphere deployment)
 BASE_PATH = os.environ.get('BASE_PATH', '').rstrip('/')
 
-# Insights Hub API base URL - Gateway endpoint
-INSIGHTS_HUB_API_BASE = 'https://gateway.eu1.mindsphere.io'
+# Insights Hub API base URLs
+MINDSPHERE_API_BASE = 'https://gateway.eu1.mindsphere.io'
+SIEMENS_CLOUD_API_BASE = 'https://api.eu1.cloud.sw.siemens.com'
 
 # Store submissions in memory (in production, use a database)
 submissions = []
 
+def get_api_base():
+    """Get the appropriate API base URL for this request"""
+    return getattr(g, 'api_base', MINDSPHERE_API_BASE)
+
 # Request interceptor to log caller information
 @app.before_request
 def log_request_info():
-    """Log information about incoming requests"""
+    """Log information about incoming requests and set API base URL"""
+    # Determine API base URL based on request origin
+    host = request.headers.get('Host', '')
+    origin = request.headers.get('Origin', '')
+    referer = request.headers.get('Referer', '')
+    
+    # Check if request is from siemens.app domain
+    if 'siemens.app' in host or 'siemens.app' in origin or 'siemens.app' in referer:
+        g.api_base = SIEMENS_CLOUD_API_BASE
+        platform = 'Siemens Xcelerator (siemens.app)'
+    else:
+        g.api_base = MINDSPHERE_API_BASE
+        platform = 'MindSphere (mindsphere.io)'
+    
     print("=" * 60)
     print(f"INCOMING REQUEST at {datetime.now().isoformat()}")
     print("=" * 60)
+    print(f"Platform: {platform}")
+    print(f"API Base URL: {g.api_base}")
     print(f"Method: {request.method}")
     print(f"Path: {request.path}")
     print(f"Full URL: {request.url}")
@@ -176,7 +196,7 @@ def get_dashboard_metrics():
         # 1. Get Asset Count
         try:
             assets_response = requests.get(
-                f'{INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets',
+                f'{get_api_base()}/api/assetmanagement/v3/assets',
                 headers=headers,
                 params={'size': 1},
                 timeout=30
@@ -189,15 +209,15 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['assets'] = {'count': 0, 'status': 'error', 'message': f'HTTP {assets_response.status_code}'}
-                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets → HTTP {assets_response.status_code}')
+                errors.append(f'GET {get_api_base()}/api/assetmanagement/v3/assets → HTTP {assets_response.status_code}')
         except Exception as e:
             metrics['assets'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets → {str(e)}')
+            errors.append(f'GET {get_api_base()}/api/assetmanagement/v3/assets → {str(e)}')
         
         # 2. Get Agent Count from Asset Manager
         try:
             agents_response = requests.get(
-                f'{INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets',
+                f'{get_api_base()}/api/assetmanagement/v3/assets',
                 headers=headers,
                 params={'filter': '{"hasType":{"in":["core.basicagent"]}}', 'page': 1000000, 'size': 200},
                 timeout=30
@@ -210,15 +230,15 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['agents'] = {'count': 0, 'status': 'error', 'message': f'HTTP {agents_response.status_code}'}
-                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets?filter={{"hasType":{{"in":["core.basicagent"]}}}} → HTTP {agents_response.status_code}')
+                errors.append(f'GET {get_api_base()}/api/assetmanagement/v3/assets?filter={{"hasType":{{"in":["core.basicagent"]}}}} → HTTP {agents_response.status_code}')
         except Exception as e:
             metrics['agents'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets (agents filter) → {str(e)}')
+            errors.append(f'GET {get_api_base()}/api/assetmanagement/v3/assets (agents filter) → {str(e)}')
         
         # 3. Get Data Lake Objects Count
         try:
             datalake_response = requests.get(
-                f'{INSIGHTS_HUB_API_BASE}/api/datalake/v3/listObjects',
+                f'{get_api_base()}/api/datalake/v3/listObjects',
                 headers=headers,
                 params={'path': '/', 'size': 1000},
                 timeout=30
@@ -237,10 +257,10 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['datalake'] = {'objects': 0, 'status': 'error', 'message': f'HTTP {datalake_response.status_code}'}
-                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/datalake/v3/listObjects?path=/ → HTTP {datalake_response.status_code}')
+                errors.append(f'GET {get_api_base()}/api/datalake/v3/listObjects?path=/ → HTTP {datalake_response.status_code}')
         except Exception as e:
             metrics['datalake'] = {'objects': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/datalake/v3/listObjects?path=/ → {str(e)}')
+            errors.append(f'GET {get_api_base()}/api/datalake/v3/listObjects?path=/ → {str(e)}')
         
         # 4. Get Event Count
         try:
@@ -249,7 +269,7 @@ def get_dashboard_metrics():
             one_year_ago = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
             
             events_response = requests.get(
-                f'{INSIGHTS_HUB_API_BASE}/api/eventmanagement/v3/events',
+                f'{get_api_base()}/api/eventmanagement/v3/events',
                 headers=headers,
                 params={
                     'size': 1,
@@ -268,15 +288,15 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['events'] = {'count': 0, 'status': 'error', 'message': f'HTTP {events_response.status_code}'}
-                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/eventmanagement/v3/events → HTTP {events_response.status_code}')
+                errors.append(f'GET {get_api_base()}/api/eventmanagement/v3/events → HTTP {events_response.status_code}')
         except Exception as e:
             metrics['events'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/eventmanagement/v3/events → {str(e)}')
+            errors.append(f'GET {get_api_base()}/api/eventmanagement/v3/events → {str(e)}')
         
         # 5. Get VFC Flows Count
         try:
             vfc_response = requests.get(
-                f'{INSIGHTS_HUB_API_BASE}/api/visualflowcreator/v3/flows',
+                f'{get_api_base()}/api/visualflowcreator/v3/flows',
                 headers=headers,
                 params={'size': 1},
                 timeout=30
@@ -289,15 +309,15 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['vfc_flows'] = {'count': 0, 'status': 'error', 'message': f'HTTP {vfc_response.status_code}'}
-                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/visualflowcreator/v3/flows → HTTP {vfc_response.status_code}')
+                errors.append(f'GET {get_api_base()}/api/visualflowcreator/v3/flows → HTTP {vfc_response.status_code}')
         except Exception as e:
             metrics['vfc_flows'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/visualflowcreator/v3/flows → {str(e)}')
+            errors.append(f'GET {get_api_base()}/api/visualflowcreator/v3/flows → {str(e)}')
         
         # 6. Get Dashboard Count
         try:
             dashboards_response = requests.get(
-                f'{INSIGHTS_HUB_API_BASE}/api/kpidashboardconfiguration/v3/dashboards',
+                f'{get_api_base()}/api/kpidashboardconfiguration/v3/dashboards',
                 headers=headers,
                 params={'size': 1},
                 timeout=30
@@ -310,15 +330,15 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['dashboards'] = {'count': 0, 'status': 'error', 'message': f'HTTP {dashboards_response.status_code}'}
-                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/kpidashboardconfiguration/v3/dashboards → HTTP {dashboards_response.status_code}')
+                errors.append(f'GET {get_api_base()}/api/kpidashboardconfiguration/v3/dashboards → HTTP {dashboards_response.status_code}')
         except Exception as e:
             metrics['dashboards'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/kpidashboardconfiguration/v3/dashboards → {str(e)}')
+            errors.append(f'GET {get_api_base()}/api/kpidashboardconfiguration/v3/dashboards → {str(e)}')
         
         # 7. Get Rules Count
         try:
             rules_response = requests.get(
-                f'{INSIGHTS_HUB_API_BASE}/api/rulesmanagement/v4/rules',
+                f'{get_api_base()}/api/rulesmanagement/v4/rules',
                 headers=headers,
                 params={'size': 1},
                 timeout=30
@@ -331,15 +351,15 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['rules'] = {'count': 0, 'status': 'error', 'message': f'HTTP {rules_response.status_code}'}
-                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/rulesmanagement/v4/rules → HTTP {rules_response.status_code}')
+                errors.append(f'GET {get_api_base()}/api/rulesmanagement/v4/rules → HTTP {rules_response.status_code}')
         except Exception as e:
             metrics['rules'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/rulesmanagement/v4/rules → {str(e)}')
+            errors.append(f'GET {get_api_base()}/api/rulesmanagement/v4/rules → {str(e)}')
         
         # 8. Get Cases Count (if available)
         try:
             cases_response = requests.get(
-                f'{INSIGHTS_HUB_API_BASE}/api/casemanagement/v3/cases',
+                f'{get_api_base()}/api/casemanagement/v3/cases',
                 headers=headers,
                 params={'size': 1},
                 timeout=30
@@ -352,15 +372,15 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['cases'] = {'count': 0, 'status': 'error', 'message': f'HTTP {cases_response.status_code}'}
-                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/casemanagement/v3/cases → HTTP {cases_response.status_code}')
+                errors.append(f'GET {get_api_base()}/api/casemanagement/v3/cases → HTTP {cases_response.status_code}')
         except Exception as e:
             metrics['cases'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/casemanagement/v3/cases → {str(e)}')
+            errors.append(f'GET {get_api_base()}/api/casemanagement/v3/cases → {str(e)}')
         
         # 9. Get Predictions Count (AI/ML)
         try:
             predictions_response = requests.get(
-                f'{INSIGHTS_HUB_API_BASE}/api/oipredictapi/v3/predict-assets/all',
+                f'{get_api_base()}/api/oipredictapi/v3/predict-assets/all',
                 headers=headers,
                 timeout=30
             )
@@ -372,16 +392,16 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['predictions'] = {'count': 0, 'status': 'error', 'message': f'HTTP {predictions_response.status_code}'}
-                errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/oipredictapi/v3/predict-assets/all → HTTP {predictions_response.status_code}')
+                errors.append(f'GET {get_api_base()}/api/oipredictapi/v3/predict-assets/all → HTTP {predictions_response.status_code}')
         except Exception as e:
             metrics['predictions'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {INSIGHTS_HUB_API_BASE}/api/oipredictapi/v3/predict-assets/all → {str(e)}')
+            errors.append(f'GET {get_api_base()}/api/oipredictapi/v3/predict-assets/all → {str(e)}')
         
         # 10. Get Anomaly Detection Count
         try:
-            # Note: Using gateway endpoint for oipredictapi
+            # Note: Using appropriate gateway endpoint based on platform
             anomaly_response = requests.get(
-                'https://gateway.eu1.mindsphere.io/api/oipredictapi/v3/usageDetails',
+                f'{get_api_base()}/api/oipredictapi/v3/usageDetails',
                 headers=headers,
                 params={'requestType': 'ANOMALY'},
                 timeout=30
@@ -394,10 +414,10 @@ def get_dashboard_metrics():
                 }
             else:
                 metrics['anomaly_detections'] = {'count': 0, 'status': 'error', 'message': f'HTTP {anomaly_response.status_code}'}
-                errors.append(f'GET https://gateway.eu1.mindsphere.io/api/oipredictapi/v3/usageDetails?requestType=ANOMALY → HTTP {anomaly_response.status_code}')
+                errors.append(f'GET {get_api_base()}/api/oipredictapi/v3/usageDetails?requestType=ANOMALY → HTTP {anomaly_response.status_code}')
         except Exception as e:
             metrics['anomaly_detections'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET https://gateway.eu1.mindsphere.io/api/oipredictapi/v3/usageDetails?requestType=ANOMALY → {str(e)}')
+            errors.append(f'GET {get_api_base()}/api/oipredictapi/v3/usageDetails?requestType=ANOMALY → {str(e)}')
         
         return jsonify({
             'success': True,
@@ -420,7 +440,7 @@ def get_insights_hub_assets():
         # Get authorization token from request headers (passed through by gateway)
         auth_header = request.headers.get('Authorization')
         # Insights Hub Asset Management API endpoint
-        api_url = f'{INSIGHTS_HUB_API_BASE}/api/assetmanagement/v3/assets'
+        api_url = f'{get_api_base()}/api/assetmanagement/v3/assets'
         
         # Get query parameters (for pagination, filtering, etc.)
         params = {

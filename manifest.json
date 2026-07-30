@@ -37,6 +37,20 @@
       "path": "/api/health",
       "methods": ["GET"],
       "public": true
+    },
+    {
+      "name": "dashboard_metrics_api",
+      "type": "api",
+      "path": "/api/insights-hub/dashboard-metrics",
+      "methods": ["GET", "OPTIONS"],
+      "public": true
+    },
+    {
+      "name": "insights_hub_assets_api",
+      "type": "api",
+      "path": "/api/insights-hub/assets",
+      "methods": ["GET", "OPTIONS"],
+      "public": true
     }
   ],
   "proxyTimeout": 120000,

@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flask-app-config
+  namespace: flask-app
+data:
+  PORT: "8080"
+  BASE_PATH: ""
+  WORKERS: "4"
+  FLASK_ENV: "production"

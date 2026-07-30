@@ -454,7 +454,7 @@ def get_insights_hub_assets():
         
         # Make request to Insights Hub API
         headers = {
-            'Authorization': user_auth_header,
+            'Authorization': auth_header,
             'Content-Type': 'application/json'
         }
         

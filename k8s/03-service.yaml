@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: flask-insights-hub
+  namespace: flask-app
+  labels:
+    app: flask-insights-hub
+spec:
+  type: LoadBalancer
+  selector:
+    app: flask-insights-hub
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600

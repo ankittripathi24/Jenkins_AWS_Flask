@@ -1,0 +1,10 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: flask-insights-hub-pdb
+  namespace: flask-app
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: flask-insights-hub

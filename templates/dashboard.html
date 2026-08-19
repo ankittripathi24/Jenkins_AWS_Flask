@@ -3,334 +3,400 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Insights Hub Tenant Dashboard</title>
+    <title>Tenant X-Ray | Insights Hub</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        :root {
+            --brand-primary: #009999;
+            --brand-dark: #1e1e1e;
+            --brand-light: #f4f4f5;
+            --text-main: #333333;
+            --text-muted: #666666;
+            --border-color: #d1d5db;
         }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: var(--brand-light); color: var(--text-main); }
 
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
+        /* _mdspcontent fills the viewport below the real MindSphere OS Bar */
+        #_mdspcontent { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+        /* Layout */
+        .app-container { display: flex; flex: 1; overflow: hidden; }
+
+        /* Sidebar — matches IH left-nav style */
+        .sidebar {
+            width: 200px;
+            background-color: #2d2d2d;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
         }
-
-        /* OS Bar compatible wrapper */
-        #_mdspcontent {
-            padding: 20px;
-            min-height: calc(100vh - 48px); /* Account for OS Bar height */
-            position: relative;
-        }
-
-        .header {
-            text-align: center;
-            color: white;
-            margin-bottom: 30px;
-        }
-
-        .header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }
-
-        .header p {
-            font-size: 1.1em;
-            opacity: 0.9;
-        }
-
-        .dashboard {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-
-        .refresh-section {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-
-        .refresh-btn {
-            padding: 15px 40px;
-            background: white;
-            color: #667eea;
-            border: none;
-            border-radius: 50px;
-            font-size: 16px;
+        .sidebar-brand {
+            padding: 14px 16px 10px;
+            border-bottom: 1px solid #444;
+            font-size: 13px;
             font-weight: 600;
+            color: white;
+            letter-spacing: 0.3px;
+        }
+        .sidebar-tenant {
+            font-size: 11px;
+            color: var(--brand-primary);
+            font-weight: 400;
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .sidebar-section { padding: 14px 16px 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #888; font-weight: 600; }
+        .nav-item {
+            padding: 9px 16px;
             cursor: pointer;
-            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
-            transition: transform 0.2s, box-shadow 0.2s;
+            font-size: 13px;
+            color: #ccc;
+            border-left: 3px solid transparent;
+            transition: all 0.12s;
+            white-space: nowrap;
         }
+        .nav-item:hover { background-color: #3a3a3a; color: white; }
+        .nav-item.active { border-left-color: var(--brand-primary); background-color: #1a3a3a; color: white; font-weight: 600; }
 
-        .refresh-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+        /* Main content */
+        .main-content { flex: 1; padding: 24px; overflow-y: auto; }
+        .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+        .page-title { font-size: 18px; font-weight: 500; }
+        .page-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+        /* Buttons */
+        button { background-color: var(--brand-primary); color: white; border: none; padding: 7px 18px; border-radius: 2px; cursor: pointer; font-size: 13px; font-weight: 600; transition: background 0.15s; }
+        button:hover { background-color: #007a7a; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Metrics tiles */
+        .metrics-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 24px; }
+        .metric-tile { background: white; border: 1px solid var(--border-color); padding: 14px 16px; border-radius: 2px; }
+        .metric-tile-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .metric-tile-value { font-size: 24px; font-weight: 700; color: var(--text-main); margin-top: 4px; }
+        .metric-tile-status { font-size: 11px; margin-top: 2px; }
+        .metric-tile-status.ok { color: var(--brand-primary); }
+        .metric-tile-status.err { color: #dc3545; }
+
+        /* Asset cards */
+        .asset-list { display: flex; flex-direction: column; gap: 10px; }
+        .asset-card { background: white; border: 1px solid var(--border-color); border-radius: 2px; }
+        .asset-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; cursor: pointer; gap: 12px; user-select: none; }
+        .asset-header:hover { background-color: #fafafa; }
+        .asset-title { font-weight: 600; font-size: 14px; min-width: 180px; }
+        .asset-type { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+        .asset-metrics-row { display: flex; gap: 28px; flex-wrap: wrap; margin-left: auto; }
+        .a-metric { display: flex; flex-direction: column; align-items: flex-end; }
+        .a-metric span:first-child { font-size: 11px; color: var(--text-muted); }
+        .a-metric strong { font-size: 13px; color: var(--text-main); }
+        .asset-chevron { color: var(--text-muted); font-size: 12px; flex-shrink: 0; transition: transform 0.2s; }
+        .asset-chevron.open { transform: rotate(180deg); }
+
+        /* Expanded details */
+        .asset-details { display: none; border-top: 1px solid var(--border-color); padding: 18px; background-color: #fafafa; }
+        .asset-details.expanded { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+        .detail-section { background: white; border: 1px solid var(--border-color); padding: 14px; border-radius: 2px; }
+        .detail-section h4 { font-size: 11px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 6px; letter-spacing: 0.5px; }
+        .data-list { list-style: none; font-size: 13px; }
+        .data-list li { padding: 5px 0; border-bottom: 1px dashed #eee; display: flex; justify-content: space-between; gap: 8px; }
+        .data-list li:last-child { border-bottom: none; }
+        .badge { display: inline-block; background: #e5e7eb; padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; margin: 1px; }
+
+        /* Status / errors */
+        .status-msg { font-size: 13px; color: var(--text-muted); padding: 12px 0; display: none; }
+        .error-banner { background: #fff3cd; border: 1px solid #ffc107; border-radius: 2px; padding: 12px 16px; margin-bottom: 16px; font-size: 13px; color: #856404; display: none; }
+        .placeholder-page { padding: 20px 0; color: var(--text-muted); font-size: 14px; }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .sidebar { display: none; }
+            .asset-details.expanded { grid-template-columns: 1fr; }
+            .metrics-strip { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
         }
-
-        .refresh-btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .metrics-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-
-        .metric-card {
-            background: white;
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-            transition: transform 0.2s;
-        }
-
-        .metric-card:hover {
-            transform: translateY(-5px);
-        }
-
-        .metric-icon {
-            font-size: 2.5em;
-            margin-bottom: 15px;
-        }
-
-        .metric-title {
-            color: #666;
-            font-size: 0.9em;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 10px;
-        }
-
-        .metric-value {
-            font-size: 2.5em;
-            font-weight: bold;
-            color: #333;
-            margin-bottom: 5px;
-        }
-
-        .metric-status {
-            font-size: 0.85em;
-            color: #999;
-        }
-
-        .metric-status.success {
-            color: #28a745;
-        }
-
-        .metric-status.error {
-            color: #dc3545;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: white;
-            font-size: 1.2em;
-        }
-
-        .error-section {
-            background: #fff3cd;
-            border: 2px solid #ffc107;
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 20px;
-            max-width: 1400px;
-            margin: 20px auto;
-        }
-
-        .error-title {
-            color: #856404;
-            font-weight: bold;
-            margin-bottom: 10px;
-        }
-
-        .error-list {
-            color: #856404;
-            font-size: 0.9em;
-            list-style-position: inside;
-        }
-
-        .timestamp {
-            text-align: center;
-            color: white;
-            margin-top: 20px;
-            opacity: 0.8;
-            font-size: 0.9em;
-        }
-
-        @media (max-width: 768px) {
-            .header h1 {
-                font-size: 1.8em;
-            }
-
-            .metrics-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .metric-value {
-                font-size: 2em;
-            }
+        @media (max-width: 600px) {
+            .main-content { padding: 14px; }
+            .asset-header { flex-wrap: wrap; }
         }
     </style>
 </head>
 <body>
-    <div id="_mdspcontent" class="_mdspcontent">
-        <script>
-            const BASE_PATH = '{{ base_path }}';
-        </script>
+    <script>const BASE_PATH = '{{ base_path }}';</script>
 
-        <div class="header">
-            <h1>🏢 Insights Hub Tenant Dashboard</h1>
-            <p>Real-time metrics and analytics for your tenant</p>
+    <div id="_mdspcontent">
+    <div class="app-container">
+        <div class="sidebar">
+            <div class="sidebar-brand">
+                Tenant X-Ray
+                <div class="sidebar-tenant" id="tenantBadge">Loading&hellip;</div>
+            </div>
+            <div class="sidebar-section">Overview</div>
+            <div class="nav-item active" id="nav-overview">&#128202; Tenant Overview</div>
+            <div class="sidebar-section">Assets</div>
+            <div class="nav-item" id="nav-assets">&#128230; Asset X-Ray</div>
+            <div class="sidebar-section">Resources</div>
+            <div class="nav-item" id="nav-datalake">&#128190; Datalake</div>
+            <div class="nav-item" id="nav-cases">&#128193; Cases</div>
+            <div class="nav-item" id="nav-rules">&#128203; Rules</div>
         </div>
 
-    <div class="dashboard">
-        <div class="refresh-section">
-            <button class="refresh-btn" id="refreshBtn" onclick="loadMetrics()">
-                🔄 Load Metrics
-            </button>
-        </div>
+        <div class="main-content">
 
-        <div id="loadingSection" class="loading" style="display: none;">
-            Loading metrics from Insights Hub...
-        </div>
+            <!-- Tenant Overview Page -->
+            <div id="overview-page" class="page">
+                <div class="page-header">
+                    <div>
+                        <div class="page-title">Tenant Overview</div>
+                        <div class="page-subtitle">Aggregate metrics across all services</div>
+                    </div>
+                    <button id="refreshMetricsBtn">&#8635; Refresh</button>
+                </div>
+                <div class="status-msg" id="metrics-loading">Querying Insights Hub APIs&hellip;</div>
+                <div class="error-banner" id="metrics-error"></div>
+                <div class="metrics-strip" id="metrics-strip"></div>
+            </div>
 
-        <div id="errorSection" class="error-section" style="display: none;">
-            <div class="error-title">⚠️ Some APIs that returned errors:</div>
-            <ul class="error-list" id="errorList"></ul>
-        </div>
+            <!-- Asset X-Ray Page -->
+            <div id="assets-page" class="page" style="display:none">
+                <div class="page-header">
+                    <div>
+                        <div class="page-title">Asset X-Ray</div>
+                        <div class="page-subtitle" id="assets-subtitle">All assets in your tenant, sorted by last update</div>
+                    </div>
+                    <button id="refreshAssetsBtn">&#8635; Refresh</button>
+                </div>
+                <div class="status-msg" id="assets-loading">Loading assets from Insights Hub&hellip;</div>
+                <div class="error-banner" id="assets-error"></div>
+                <div class="asset-list" id="asset-container"></div>
+            </div>
 
-        <div class="metrics-grid" id="metricsGrid">
-            <!-- Metrics will be inserted here dynamically -->
-        </div>
+            <!-- Datalake Page -->
+            <div id="datalake-page" class="page" style="display:none">
+                <div class="page-header"><div class="page-title">Datalake Overview</div></div>
+                <div class="placeholder-page">Connects to <code>/api/datalake/v3/listObjects</code>. Select <strong>Tenant Overview</strong> to see the datalake object count.</div>
+            </div>
 
-        <div class="timestamp" id="timestamp"></div>
+            <!-- Cases Page -->
+            <div id="cases-page" class="page" style="display:none">
+                <div class="page-header"><div class="page-title">System Cases</div></div>
+                <div class="placeholder-page">Connects to <code>/api/casemanagement/v3/cases</code>.</div>
+            </div>
+
+            <!-- Rules Page -->
+            <div id="rules-page" class="page" style="display:none">
+                <div class="page-header"><div class="page-title">Global Rules</div></div>
+                <div class="placeholder-page">Connects to <code>/api/rulesmanagement/v4/rules</code>.</div>
+            </div>
+
+        </div>
     </div>
+    </div><!-- /#_mdspcontent -->
 
     <script>
-        const API_BASE_URL = window.location.origin + BASE_PATH;
+        const API_BASE = window.location.origin + BASE_PATH;
 
-        const metricConfigs = [
-            { key: 'assets', icon: '📦', title: 'Total Assets', field: 'count' },
-            { key: 'agents', icon: '🤖', title: 'Agent Count', field: 'count' },
-            { key: 'datalake', icon: '💾', title: 'Data Lake Objects', field: 'objects' },
-            { key: 'events', icon: '⚡', title: 'Events', field: 'count' },
-            { key: 'vfc_flows', icon: '🔄', title: 'VFC Flows', field: 'count' },
-            { key: 'dashboards', icon: '📊', title: 'Dashboards', field: 'count' },
-            { key: 'rules', icon: '📋', title: 'Rules', field: 'count' },
-            { key: 'cases', icon: '📁', title: 'Cases', field: 'count' },
-            { key: 'predictions', icon: '🔮', title: 'Prediction Models', field: 'count' },
-            { key: 'anomaly_detections', icon: '🎯', title: 'Anomaly Models', field: 'count' }
+        // ── Navigation ─────────────────────────────────────────────────────────
+        const NAV_MAP = {
+            'nav-assets':   'assets-page',
+            'nav-overview': 'overview-page',
+            'nav-datalake': 'datalake-page',
+            'nav-cases':    'cases-page',
+            'nav-rules':    'rules-page',
+        };
+        var assetsLoaded = false;
+        Object.entries(NAV_MAP).forEach(([navId, pageId]) => {
+            document.getElementById(navId).addEventListener('click', () => {
+                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+                document.getElementById(navId).classList.add('active');
+                document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
+                document.getElementById(pageId).style.display = 'block';
+                // Lazy-load assets the first time the user opens that page
+                if (navId === 'nav-assets' && !assetsLoaded) {
+                    assetsLoaded = true;
+                    loadAssets();
+                }
+            });
+        });
+
+        // ── Tenant Info ─────────────────────────────────────────────────────────
+        async function loadTenantInfo() {
+            try {
+                const r = await fetch(API_BASE + '/api/insights-hub/tenant-info');
+                if (!r.ok) return;
+                const d = await r.json();
+                if (d.success) {
+                    const name = d.tenant || 'unknown';
+                    document.getElementById('tenantBadge').textContent = name;
+                    document.title = name + ' X-Ray | Insights Hub';
+                }
+            } catch (_) {}
+        }
+
+        // ── Asset X-Ray ─────────────────────────────────────────────────────────
+        async function loadAssets() {
+            const container = document.getElementById('asset-container');
+            const loader    = document.getElementById('assets-loading');
+            const errBanner = document.getElementById('assets-error');
+            const subtitle  = document.getElementById('assets-subtitle');
+            const btn       = document.getElementById('refreshAssetsBtn');
+            container.innerHTML = '';
+            loader.style.display = 'block';
+            errBanner.style.display = 'none';
+            btn.disabled = true;
+            try {
+                const r = await fetch(API_BASE + '/api/insights-hub/assets?size=50&page=0');
+                const d = await r.json();
+                if (!d.success) { showError(errBanner, d.error || 'Failed to load assets', d.details); return; }
+                const raw   = d.data;
+                const items = (raw && raw._embedded && raw._embedded.assets) || raw.content || raw.assets || [];
+                const total = (raw && raw.page && raw.page.totalElements) || items.length;
+                if (items.length === 0) {
+                    container.innerHTML = '<p style="color:var(--text-muted);font-size:13px">No assets found in this tenant.</p>';
+                    return;
+                }
+                items.sort((a, b) => new Date(b.lastModifiedDate || 0) - new Date(a.lastModifiedDate || 0));
+                items.forEach(asset => renderAssetCard(asset, container));
+                subtitle.textContent = items.length + ' of ' + total + ' assets \u00b7 sorted by last update';
+            } catch (e) { showError(errBanner, 'Network error: ' + e.message); }
+            finally { loader.style.display = 'none'; btn.disabled = false; }
+        }
+
+        function renderAssetCard(asset, container) {
+            const id      = asset.assetId || asset.entityId || asset.id || '?';
+            const name    = asset.name || id;
+            const type    = asset.typeId || asset.assetTypeId || '\u2014';
+            const desc    = asset.description || '';
+            const lastMod = asset.lastModifiedDate ? new Date(asset.lastModifiedDate).toLocaleString() : '\u2014';
+            const created = asset.createdDate     ? new Date(asset.createdDate).toLocaleDateString()   : '\u2014';
+            const aspects = asset.aspects || asset.variables || [];
+            const domId   = 'det' + id.replace(/[^a-z0-9]/gi, '');
+
+            const aspectsHtml = aspects.length
+                ? '<ul class="data-list">' + aspects.map(function(a) {
+                    return '<li><span>' + esc(a.name || a.aspectId || '\u2014') + '</span>'
+                         + '<span class="badge">' + esc(a.category || a.type || '\u2014') + '</span></li>';
+                  }).join('') + '</ul>'
+                : '<p style="font-size:12px;color:var(--text-muted)">No aspect data returned by this API call.</p>';
+
+            const card = document.createElement('div');
+            card.className = 'asset-card';
+            card.innerHTML =
+                '<div class="asset-header" id="hdr-' + domId + '">'
+              +   '<div>'
+              +     '<div class="asset-title">' + esc(name) + '</div>'
+              +     '<div class="asset-type">' + esc(type) + '</div>'
+              +   '</div>'
+              +   '<div class="asset-metrics-row">'
+              +     '<div class="a-metric"><span>Last Updated</span><strong>' + lastMod + '</strong></div>'
+              +     '<div class="a-metric"><span>Created</span><strong>' + created + '</strong></div>'
+              +     '<div class="a-metric"><span>Asset ID</span><strong style="font-size:11px;font-family:monospace">' + esc(id.substring(0, 8)) + '&hellip;</strong></div>'
+              +   '</div>'
+              +   '<span class="asset-chevron" id="chev-' + domId + '">\u25bc</span>'
+              + '</div>'
+              + '<div class="asset-details" id="' + domId + '">'
+              +   '<div class="detail-section">'
+              +     '<h4>Asset Details</h4>'
+              +     '<ul class="data-list">'
+              +       '<li><span>Full Asset ID</span><span style="font-family:monospace;font-size:11px">' + esc(id) + '</span></li>'
+              +       '<li><span>Type</span><span>' + esc(type) + '</span></li>'
+              +       '<li><span>Description</span><span>' + (esc(desc) || '\u2014') + '</span></li>'
+              +       '<li><span>Created</span><span>' + created + '</span></li>'
+              +       '<li><span>Last Modified</span><span>' + lastMod + '</span></li>'
+              +     '</ul>'
+              +   '</div>'
+              +   '<div class="detail-section">'
+              +     '<h4>Variables &amp; Aspects</h4>'
+              +     aspectsHtml
+              +   '</div>'
+              + '</div>';
+
+            card.querySelector('#hdr-' + domId).addEventListener('click', function() { toggleDetails(domId); });
+            container.appendChild(card);
+        }
+
+        function toggleDetails(domId) {
+            var det  = document.getElementById(domId);
+            var chev = document.getElementById('chev-' + domId);
+            var open = det.classList.toggle('expanded');
+            chev.classList.toggle('open', open);
+        }
+
+        // ── Tenant Overview Metrics ──────────────────────────────────────────────
+        var METRIC_CONFIGS = [
+            { key: 'assets',             label: 'Assets',           field: 'count'   },
+            { key: 'agents',             label: 'Agents',           field: 'count'   },
+            { key: 'datalake',           label: 'Datalake Objects',  field: 'objects' },
+            { key: 'events',             label: 'Events (1yr)',      field: 'count'   },
+            { key: 'vfc_flows',          label: 'VFC Flows',        field: 'count'   },
+            { key: 'dashboards',         label: 'Dashboards',       field: 'count'   },
+            { key: 'rules',              label: 'Rules',            field: 'count'   },
+            { key: 'cases',              label: 'Cases',            field: 'count'   },
+            { key: 'predictions',        label: 'Predict Models',   field: 'count'   },
+            { key: 'anomaly_detections', label: 'Anomaly Models',   field: 'count'   },
         ];
 
         async function loadMetrics() {
-            const refreshBtn = document.getElementById('refreshBtn');
-            const loadingSection = document.getElementById('loadingSection');
-            const metricsGrid = document.getElementById('metricsGrid');
-            const errorSection = document.getElementById('errorSection');
-            const errorList = document.getElementById('errorList');
-            const timestampDiv = document.getElementById('timestamp');
-
-            refreshBtn.disabled = true;
-            refreshBtn.textContent = '⏳ Loading...';
-            loadingSection.style.display = 'block';
-            metricsGrid.innerHTML = '';
-            errorSection.style.display = 'none';
-
+            var strip     = document.getElementById('metrics-strip');
+            var loader    = document.getElementById('metrics-loading');
+            var errBanner = document.getElementById('metrics-error');
+            var btn       = document.getElementById('refreshMetricsBtn');
+            strip.innerHTML = '';
+            loader.style.display = 'block';
+            errBanner.style.display = 'none';
+            btn.disabled = true;
             try {
-                const response = await fetch(`${API_BASE_URL}/api/insights-hub/dashboard-metrics`, {
-                    method: 'GET',
-                    credentials: 'include',
-                    headers: {
-                        'Accept': 'application/json'
-                    }
+                var r = await fetch(API_BASE + '/api/insights-hub/dashboard-metrics');
+                var d = await r.json();
+                if (!d.success) { showError(errBanner, d.error || 'Failed to load metrics'); return; }
+                METRIC_CONFIGS.forEach(function(cfg) {
+                    var m = d.metrics && d.metrics[cfg.key];
+                    if (!m) return;
+                    var val  = m[cfg.field] !== undefined ? m[cfg.field] : 0;
+                    var ok   = m.status === 'success';
+                    var tile = document.createElement('div');
+                    tile.className = 'metric-tile';
+                    tile.innerHTML = '<div class="metric-tile-label">' + cfg.label + '</div>'
+                      + '<div class="metric-tile-value">' + val.toLocaleString() + '</div>'
+                      + '<div class="metric-tile-status ' + (ok ? 'ok' : 'err') + '">'
+                      + (ok ? '\u25cf Active' : '\u26a0 ' + esc(m.message || 'Error')) + '</div>';
+                    strip.appendChild(tile);
                 });
-
-                console.log('Response status:', response.status);
-                console.log('Response headers:', [...response.headers.entries()]);
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                if (d.errors && d.errors.length) {
+                    errBanner.style.display = 'block';
+                    errBanner.innerHTML = '<strong>Some APIs returned errors:</strong><ul>'
+                        + d.errors.map(function(e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul>';
                 }
-
-                const data = await response.json();
-
-                if (data.success) {
-                    const metrics = data.metrics;
-
-                    // Display metrics
-                    metricConfigs.forEach(config => {
-                        const metric = metrics[config.key];
-                        if (metric) {
-                            const value = metric[config.field] || 0;
-                            const status = metric.status || 'unknown';
-                            const statusClass = status === 'success' ? 'success' : 'error';
-                            const statusText = status === 'success' ? '✓ Active' : `⚠ ${metric.message || 'Error'}`;
-
-                            const card = document.createElement('div');
-                            card.className = 'metric-card';
-                            card.innerHTML = `
-                                <div class="metric-icon">${config.icon}</div>
-                                <div class="metric-title">${config.title}</div>
-                                <div class="metric-value">${value.toLocaleString()}</div>
-                                <div class="metric-status ${statusClass}">${statusText}</div>
-                            `;
-                            metricsGrid.appendChild(card);
-                        }
-                    });
-
-                    // Display errors if any
-                    if (data.errors && data.errors.length > 0) {
-                        errorSection.style.display = 'block';
-                        errorList.innerHTML = data.errors.map(err => `<li>${err}</li>`).join('');
-                    }
-
-                    // Display timestamp
-                    const timestamp = new Date(data.timestamp);
-                    timestampDiv.textContent = `Last updated: ${timestamp.toLocaleString()}`;
-                } else {
-                    metricsGrid.innerHTML = `
-                        <div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #dc3545; background: white; border-radius: 15px;">
-                            <h2>❌ Failed to load metrics</h2>
-                            <p><strong>Error:</strong> ${data.error || 'Unknown error'}</p>
-                            <pre style="text-align: left; background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 15px; font-size: 12px; overflow-x: auto;">${JSON.stringify(data, null, 2)}</pre>
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                console.error('Fetch error:', error);
-                metricsGrid.innerHTML = `
-                    <div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #dc3545; background: white; border-radius: 15px;">
-                        <h2>❌ Network Error</h2>
-                        <p><strong>Message:</strong> ${error.message}</p>
-                        <p style="font-size: 12px; color: #6c757d; margin-top: 10px;">Check browser console (F12) for details</p>
-                    </div>
-                `;
-            } finally {
-                refreshBtn.disabled = false;
-                refreshBtn.textContent = '🔄 Refresh Metrics';
-                loadingSection.style.display = 'none';
-            }
+            } catch (e) { showError(errBanner, 'Network error: ' + e.message); }
+            finally { loader.style.display = 'none'; btn.disabled = false; }
         }
 
-        // Auto-load on page load
-        window.addEventListener('load', loadMetrics);
-    </script>
-    </div><!-- End of _mdspcontent -->
+        // ── Helpers ─────────────────────────────────────────────────────────────
+        function showError(el, msg, detail) {
+            el.style.display = 'block';
+            el.innerHTML = '<strong>Error:</strong> ' + esc(msg)
+                + (detail ? '<pre style="margin-top:8px;font-size:11px;white-space:pre-wrap">'
+                    + esc(String(detail).substring(0, 400)) + '</pre>' : '');
+        }
 
-    <!-- MindSphere OS Bar -->
+        function esc(s) {
+            if (s == null) return '';
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        // ── Refresh button wiring ────────────────────────────────────────────────
+        document.getElementById('refreshAssetsBtn').addEventListener('click', loadAssets);
+        document.getElementById('refreshMetricsBtn').addEventListener('click', loadMetrics);
+
+        // ── Init ────────────────────────────────────────────────────────────────
+        loadTenantInfo();
+        loadMetrics();  // Overview is the default page
+    </script>
+
     <script src="https://static.eu1.mindsphere.io/osbar/v4/js/main.min.js"></script>
     <script>
-        _mdsp.init({
-            title: "Tenant Dashboard",
-            appId: "_mdspcontent",
-            appInfoPath: BASE_PATH + "/app-info.json"
-        });
+        _mdsp.init({ title: "Tenant X-Ray", appId: "_mdspcontent", appInfoPath: BASE_PATH + "/app-info.json" });
     </script>
 </body>
 </html>

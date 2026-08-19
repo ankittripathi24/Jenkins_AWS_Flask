@@ -316,6 +316,14 @@ def health_check():
 # BASE_PATH="/tppnd04-renderingflask-tppnd04"
 #             → routes at /tppnd04-renderingflask-tppnd04/api/...    (Render / MindSphere)
 app.register_blueprint(bp, url_prefix=BASE_PATH)
+# ── Root redirect (Render / MindSphere only) ───────────────────────────────
+# When BASE_PATH is set, MindSphere / Render may hit bare "/" before the OS Bar
+# rewrites the path. Redirect it to the real prefixed index so the UI always loads.
+if BASE_PATH:
+    from flask import redirect as _redirect
+    @app.route('/')
+    def _root_redirect():
+        return _redirect(BASE_PATH + '/', code=302)
 # ── Error handlers ────────────────────────────────────────────────────────────
 @app.errorhandler(CredentialsMissingError)
 def handle_credentials_missing(e):

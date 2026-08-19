@@ -178,7 +178,13 @@ def index():
         return render_template('dashboard.html', base_path=BASE_PATH)
     except Exception as e:
         logger.exception('Failed to render dashboard: %s', e)
-        return jsonify({'error': 'Failed to render page'}), 500
+        # Return the real error detail so it's visible during debugging
+        import traceback
+        return jsonify({
+            'error': 'Failed to render page',
+            'detail': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
 @bp.route('/app-info.json')
 def app_info():
     try:
@@ -324,6 +330,50 @@ if BASE_PATH:
     @app.route('/')
     def _root_redirect():
         return _redirect(BASE_PATH + '/', code=302)
+# ── MindSphere OS Bar API proxy ───────────────────────────────────────────────
+# The MindSphere OS Bar (main.min.js) makes calls to platform APIs like
+# /api/tenantmanagement/..., /api/im/..., /api/userprofilemanagement/...
+# These arrive at our Flask app without the BASE_PATH prefix.
+# We forward them transparently to the MindSphere gateway so the OS Bar works.
+#
+# NOTE: This proxy only handles GET requests made by the OS Bar.
+# It is NOT used for our own IH API calls (those use ih_get() directly).
+OS_BAR_API_PREFIXES = (
+    '/api/tenantmanagement/',
+    '/api/im/',
+    '/api/userprofilemanagement/',
+    '/api/pushnotification/',
+    '/api/customers/',
+)
+@app.route('/api/<path:api_path>', methods=['GET'])
+def osbar_api_proxy(api_path):
+    """Forward OS Bar platform API calls to the MindSphere gateway."""
+    full_path = '/api/' + api_path
+    # Only proxy known OS Bar prefixes — don't intercept our own /api/insights-hub/ routes
+    # (those are handled by the blueprint and will never reach this catch-all)
+    if not any(full_path.startswith(p) for p in OS_BAR_API_PREFIXES):
+        return jsonify({'error': 'Not found', 'path': full_path}), 404
+    target_url = MINDSPHERE_API_BASE + full_path
+    query_string = request.query_string.decode('utf-8')
+    if query_string:
+        target_url += '?' + query_string
+    logger.info('OS Bar proxy | path=%s | target=%s', full_path, target_url)
+    try:
+        token = get_app_token()
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json',
+        }
+        resp = requests.get(target_url, headers=headers, timeout=15)
+        logger.info('OS Bar proxy response | status=%s | path=%s', resp.status_code, full_path)
+        # Forward the response as-is
+        try:
+            return jsonify(resp.json()), resp.status_code
+        except Exception:
+            return resp.text, resp.status_code, {'Content-Type': resp.headers.get('Content-Type', 'text/plain')}
+    except Exception as e:
+        logger.exception('OS Bar proxy failed | path=%s | error=%s', full_path, e)
+        return jsonify({'error': str(e)}), 502
 # ── Error handlers ────────────────────────────────────────────────────────────
 @app.errorhandler(CredentialsMissingError)
 def handle_credentials_missing(e):

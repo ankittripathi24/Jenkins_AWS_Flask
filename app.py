@@ -4,499 +4,405 @@ from datetime import datetime, timedelta
 import os
 import requests
 import json
+import logging
+import sys
+import base64
+import threading
+import time
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
-CORS(app)  # Enable CORS for all routes
+CORS(app)
 
-# Support for base path (for Insights Hub/MindSphere deployment)
-BASE_PATH = os.environ.get('BASE_PATH', '').rstrip('/')
+# ── Logging ──────────────────────────────────────────────────────────────────
+LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
+logger = logging.getLogger('flaskapp')
+if not logger.handlers:
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
+    logger.addHandler(handler)
+logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
 
-# Insights Hub API base URLs
-MINDSPHERE_API_BASE = 'https://gateway.eu1.mindsphere.io'
-SIEMENS_CLOUD_API_BASE = 'https://api.eu1.cloud.sw.siemens.com'
+# ── Configuration (all from environment variables) ───────────────────────────
+# Set these before running:
+#   export IH_APP_CLIENT_ID="your-client-id"
+#   export IH_APP_CLIENT_SECRET="your-client-secret"
+#   export IH_APP_NAME="flaskapp"
+#   export IH_APP_VERSION="v1.0.1"
+#   export IH_HOST_TENANT="tppnr04"
+#   export BASE_PATH=""          # e.g. "/tppnr04-flaskapp-tppnr04" on MindSphere
+#   export LOG_LEVEL="INFO"
+#   export PORT="5000"
 
-# Store submissions in memory (in production, use a database)
+MINDSPHERE_API_BASE   = os.environ.get('MINDSPHERE_API_BASE',   'https://gateway.eu1.mindsphere.io')
+IH_APP_CLIENT_ID      = os.environ.get('IH_APP_CLIENT_ID',      '')
+IH_APP_CLIENT_SECRET  = os.environ.get('IH_APP_CLIENT_SECRET',  '')
+IH_APP_NAME           = os.environ.get('IH_APP_NAME',           'flaskapp')
+IH_APP_VERSION        = os.environ.get('IH_APP_VERSION',        'v1.0.1')
+IH_HOST_TENANT        = os.environ.get('IH_HOST_TENANT',        '')
+BASE_PATH             = os.environ.get('BASE_PATH',             '').rstrip('/')
+
+# ── Token cache ───────────────────────────────────────────────────────────────
+_token_lock  = threading.Lock()
+_token_cache: dict = {}   # { user_tenant: { token: str, expires_at: float } }
+
+# ── In-memory submissions store ───────────────────────────────────────────────
 submissions = []
 
-def get_api_base():
-    """Get the appropriate API base URL for this request"""
-    return getattr(g, 'api_base', MINDSPHERE_API_BASE)
+logger.info(
+    'App starting | BASE_PATH=%s | API_BASE=%s | LOG_LEVEL=%s | host_tenant=%s | credentials_configured=%s',
+    BASE_PATH, MINDSPHERE_API_BASE, LOG_LEVEL, IH_HOST_TENANT,
+    bool(IH_APP_CLIENT_ID and IH_APP_CLIENT_SECRET)
+)
 
-# Request interceptor to log caller information
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def mask_secret(value, visible_prefix=10, visible_suffix=10):
+    """Mask a sensitive string for safe logging."""
+    if not value:
+        return '***'
+    if len(value) <= (visible_prefix + visible_suffix):
+        return '***'
+    return f'{value[:visible_prefix]}...{value[-visible_suffix:]}'
+
+
+def build_api_url(service_path: str) -> str:
+    """Build a full IH API URL from a relative service path.
+    
+    Example:
+        build_api_url('assetmanagement/v3/assets')
+        → 'https://gateway.eu1.mindsphere.io/api/assetmanagement/v3/assets'
+    """
+    return f'{MINDSPHERE_API_BASE}/api/{service_path}'
+
+
+class CredentialsMissingError(Exception):
+    """Raised when IH_APP_CLIENT_ID or IH_APP_CLIENT_SECRET are not set."""
+
+
+def _fetch_app_token(user_tenant: str):
+    """Request a fresh Bearer token from the Technical Token Manager."""
+    if not IH_APP_CLIENT_ID or not IH_APP_CLIENT_SECRET:
+        raise CredentialsMissingError(
+            'App credentials not configured. '
+            'Set IH_APP_CLIENT_ID and IH_APP_CLIENT_SECRET environment variables.'
+        )
+
+    b64 = base64.b64encode(f'{IH_APP_CLIENT_ID}:{IH_APP_CLIENT_SECRET}'.encode()).decode()
+    url = f'{MINDSPHERE_API_BASE}/api/technicaltokenmanager/v3/oauth/token'
+
+    payload = {
+        'grant_type':  'client_credentials',
+        'appName':     IH_APP_NAME,
+        'appVersion':  IH_APP_VERSION,
+        'hostTenant':  IH_HOST_TENANT,
+        'userTenant':  user_tenant,
+    }
+    headers = {
+        'x-space-auth-key': f'Bearer {b64}',
+        'Content-Type':     'application/json',
+    }
+
+    logger.info(
+        'Token request | url=%s | appName=%s | appVersion=%s | hostTenant=%s | userTenant=%s',
+        url, IH_APP_NAME, IH_APP_VERSION, IH_HOST_TENANT, user_tenant
+    )
+
+    resp = requests.post(url, json=payload, headers=headers, timeout=15)
+    if resp.status_code != 200:
+        logger.error('Token fetch failed | status=%s | body=%s', resp.status_code, resp.text[:300])
+        resp.raise_for_status()
+
+    data = resp.json()
+    return data['access_token'], int(data.get('expires_in', 1800))
+
+
+def get_app_token() -> str:
+    """Return a valid cached token for the current request's tenant, refreshing when near expiry."""
+    user_tenant = getattr(g, 'user_tenant', IH_HOST_TENANT)
+    with _token_lock:
+        entry = _token_cache.get(user_tenant)
+        if entry and time.time() < entry['expires_at'] - 60:
+            return entry['token']
+        token, expires_in = _fetch_app_token(user_tenant)
+        _token_cache[user_tenant] = {'token': token, 'expires_at': time.time() + expires_in}
+        logger.info('Token refreshed | user_tenant=%s | expires_in=%ss', user_tenant, expires_in)
+        return token
+
+
+def ih_get(url: str, **kwargs):
+    """Authenticated GET against the IH API. Retries once on 401 with a fresh token."""
+    user_tenant = getattr(g, 'user_tenant', IH_HOST_TENANT)
+    logger.info('ih_get | url=%s | params=%s | user_tenant=%s', url, kwargs.get('params', {}), user_tenant)
+
+    token = get_app_token()
+    headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
+
+    resp = requests.get(url, headers=headers, **kwargs)
+    logger.info('ih_get response | status=%s | url=%s', resp.status_code, url)
+
+    if resp.status_code == 401:
+        logger.warning('Got 401 — refreshing token for tenant=%s and retrying | url=%s', user_tenant, url)
+        with _token_lock:
+            _token_cache.pop(user_tenant, None)
+        token = get_app_token()
+        headers['Authorization'] = f'Bearer {token}'
+        resp = requests.get(url, headers=headers, **kwargs)
+        logger.info('ih_get retry | status=%s | url=%s', resp.status_code, url)
+
+    if resp.status_code not in (200, 201, 204):
+        logger.warning('ih_get non-success | status=%s | body=%s', resp.status_code, resp.text[:300])
+
+    return resp
+
+
+# ── Request interceptor ───────────────────────────────────────────────────────
+
 @app.before_request
-def log_request_info():
-    """Log information about incoming requests and set API base URL"""
-    # Determine API base URL based on request origin
-    host = request.headers.get('Host', '')
-    origin = request.headers.get('Origin', '')
-    referer = request.headers.get('Referer', '')
-    
-    # Check if request is from siemens.app domain
-    if 'siemens.app' in host or 'siemens.app' in origin or 'siemens.app' in referer:
-        g.api_base = SIEMENS_CLOUD_API_BASE
-        platform = 'Siemens Xcelerator (siemens.app)'
+def set_request_context():
+    """Resolve user_tenant and base_path for every incoming request."""
+
+    # Tenant: prefer the gateway-injected header, fall back to host tenant
+    ms_tenant_header = request.headers.get('X-MindSphere-Tenant')
+    forwarded_host   = request.headers.get('X-Forwarded-Host', '')
+    subdomain        = forwarded_host.split('.')[0] if forwarded_host else ''
+    app_separator    = f'-{IH_APP_NAME}-'
+
+    if ms_tenant_header:
+        g.user_tenant = ms_tenant_header
+    elif app_separator in subdomain:
+        # e.g. "callerTenant-flaskapp-hostTenant" → "callerTenant"
+        g.user_tenant = subdomain.split(app_separator)[0]
     else:
-        g.api_base = MINDSPHERE_API_BASE
-        platform = 'MindSphere (mindsphere.io)'
-    
-    print("=" * 60)
-    print(f"INCOMING REQUEST at {datetime.now().isoformat()}")
-    print("=" * 60)
-    print(f"Platform: {platform}")
-    print(f"API Base URL: {g.api_base}")
-    print(f"Method: {request.method}")
-    print(f"Path: {request.path}")
-    print(f"Full URL: {request.url}")
-    print(f"Remote IP: {request.remote_addr}")
-    
-    # Check for forwarded IP (when behind proxy/gateway)
-    forwarded_for = request.headers.get('X-Forwarded-For')
-    if forwarded_for:
-        print(f"X-Forwarded-For: {forwarded_for}")
-    
-    real_ip = request.headers.get('X-Real-IP')
-    if real_ip:
-        print(f"X-Real-IP: {real_ip}")
-    
-    print(f"User-Agent: {request.headers.get('User-Agent', 'Not provided')}")
-    
-    # Log authorization info (without exposing full token)
-    auth_header = request.headers.get('Authorization')
-    if auth_header:
-        if auth_header.startswith('Bearer '):
-            token = auth_header[7:]
-            # Show first and last 10 chars of token for identification
-            masked_token = f"{token[:10]}...{token[-10:]}" if len(token) > 20 else "***"
-            print(f"Authorization: Bearer {masked_token}")
-        else:
-            print(f"Authorization: {auth_header[:20]}...")
-    
-    # Log Insights Hub specific headers
-    tenant = request.headers.get('X-MindSphere-Tenant')
-    if tenant:
-        print(f"Tenant: {tenant}")
-    
-    user = request.headers.get('X-MindSphere-User')
-    if user:
-        print(f"User: {user}")
-    
-    # Log all headers (for debugging)
-    print("-" * 40)
-    print("All Headers:")
+        g.user_tenant = IH_HOST_TENANT
+
+    # Base path: derive from X-Forwarded-Host when deployed, use env var locally
+    if forwarded_host:
+        g.base_path = f'/{subdomain}'
+    else:
+        g.base_path = BASE_PATH
+
+    logger.info(
+        'Request | method=%s | path=%s | user_tenant=%s | base_path=%s | remote_ip=%s',
+        request.method, request.path, g.user_tenant, g.base_path, request.remote_addr
+    )
+
+    # Skip verbose header logging for ELB health checks
+    if 'ELB-HealthChecker' in request.headers.get('User-Agent', ''):
+        return
+
     for header, value in request.headers:
-        # Mask sensitive headers
-        if header.lower() in ['authorization', 'cookie', 'x-xsrf-token']:
-            print(f"  {header}: ***masked***")
+        if header.lower() in ('authorization', 'cookie', 'x-xsrf-token'):
+            logger.debug('Header %s=***masked***', header)
         else:
-            print(f"  {header}: {value}")
-    print("=" * 60)
+            logger.debug('Header %s=%s', header, value)
+
+
+# ── Page routes ───────────────────────────────────────────────────────────────
 
 @app.route(f'{BASE_PATH}/')
 @app.route('/')
 def index():
-    """Render the main dashboard page"""
-    return render_template('dashboard.html', base_path=BASE_PATH)
+    try:
+        return render_template('dashboard.html', base_path=BASE_PATH)
+    except Exception as e:
+        logger.exception('Failed to render dashboard: %s', e)
+        return jsonify({'error': 'Failed to render page'}), 500
+
 
 @app.route(f'{BASE_PATH}/app-info.json')
 @app.route('/app-info.json')
 def app_info():
-    """Serve app-info.json for OS Bar"""
-    return send_from_directory(app.static_folder, 'app-info.json')
+    try:
+        return send_from_directory(app.static_folder, 'app-info.json')
+    except Exception as e:
+        logger.exception('Failed to serve app-info.json: %s', e)
+        return jsonify({'error': 'File not found'}), 404
+
 
 @app.route(f'{BASE_PATH}/text-submission')
 @app.route('/text-submission')
 def text_submission():
-    """Render the text submission page"""
-    return render_template('index.html', base_path=BASE_PATH)
+    try:
+        return render_template('index.html', base_path=BASE_PATH)
+    except Exception as e:
+        logger.exception('Failed to render text submission page: %s', e)
+        return jsonify({'error': 'Failed to render page'}), 500
+
+
+# ── Submission API ────────────────────────────────────────────────────────────
 
 @app.route(f'{BASE_PATH}/api/submit', methods=['POST'])
 @app.route('/api/submit', methods=['POST'])
 def submit_text():
-    """API endpoint to handle text submissions"""
     try:
         data = request.get_json()
-        
-        # Validate input
         if not data or 'name' not in data or 'text' not in data:
-            return jsonify({
-                'success': False,
-                'error': 'Missing required fields: name and text'
-            }), 400
-        
-        # Create submission entry
+            return jsonify({'success': False, 'error': 'Missing required fields: name and text'}), 400
+
         submission = {
-            'id': len(submissions) + 1,
-            'name': data['name'],
-            'text': data['text'],
+            'id':        len(submissions) + 1,
+            'name':      data['name'],
+            'text':      data['text'],
             'timestamp': datetime.now().isoformat()
         }
-        
         submissions.append(submission)
-        
-        return jsonify({
-            'success': True,
-            'message': 'Text submitted successfully',
-            'submission': submission
-        }), 201
-        
+        logger.info('Submission stored | id=%s | total=%s', submission['id'], len(submissions))
+        return jsonify({'success': True, 'message': 'Text submitted successfully', 'submission': submission}), 201
+
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        logger.exception('Submit endpoint failed: %s', e)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route(f'{BASE_PATH}/api/submissions', methods=['GET'])
 @app.route('/api/submissions', methods=['GET'])
 def get_submissions():
-    """API endpoint to retrieve all submissions"""
-    return jsonify({
-        'success': True,
-        'count': len(submissions),
-        'submissions': submissions
-    }), 200
+    return jsonify({'success': True, 'count': len(submissions), 'submissions': submissions}), 200
+
 
 @app.route(f'{BASE_PATH}/api/submissions/<int:submission_id>', methods=['GET'])
 @app.route('/api/submissions/<int:submission_id>', methods=['GET'])
 def get_submission(submission_id):
-    """API endpoint to retrieve a specific submission"""
     submission = next((s for s in submissions if s['id'] == submission_id), None)
-    
     if submission:
-        return jsonify({
-            'success': True,
-            'submission': submission
-        }), 200
-    else:
-        return jsonify({
-            'success': False,
-            'error': 'Submission not found'
-        }), 404
+        return jsonify({'success': True, 'submission': submission}), 200
+    return jsonify({'success': False, 'error': 'Submission not found'}), 404
+
+
+# ── Insights Hub API routes ───────────────────────────────────────────────────
 
 @app.route(f'{BASE_PATH}/api/insights-hub/dashboard-metrics', methods=['GET'])
 @app.route('/api/insights-hub/dashboard-metrics', methods=['GET'])
 def get_dashboard_metrics():
-    """Fetch comprehensive metrics from Insights Hub tenant"""
+    """Call 10 IH APIs and return counts for the dashboard."""
+    metrics = {}
+    errors  = []
+
+    # Each entry: (metrics_key, service_path, params)
+    api_calls = [
+        ('assets',             'assetmanagement/v3/assets',              {'size': 1}),
+        ('agents',             'assetmanagement/v3/assets',              {'filter': '{"hasType":{"in":["core.basicagent"]}}', 'size': 1}),
+        ('vfc_flows',          'visualflowcreator/v3/flows',             {'size': 1}),
+        ('dashboards',         'kpidashboardconfiguration/v3/dashboards', {'size': 1}),
+        ('rules',              'rulesmanagement/v4/rules',               {'size': 1}),
+        ('cases',              'casemanagement/v3/cases',                {'size': 1}),
+        ('predictions',        'oipredictapi/v3/predict-assets/all',     {}),
+        ('anomaly_detections', 'oipredictapi/v3/usageDetails',           {'requestType': 'ANOMALY'}),
+    ]
+
+    # Events needs a dynamic timestamp — handle separately
+    one_year_ago = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    api_calls.append((
+        'events',
+        'eventmanagement/v3/events',
+        {'size': 1, 'filter': f'{{"timestamp":{{"after":"{one_year_ago}"}}}}', 'history': 'true', 'includeShared': 'false'}
+    ))
+
+    # Data lake is also slightly different (different response shape) — handle separately
     try:
-        auth_header = request.headers.get('Authorization')
-        
-        if not auth_header:
-            return jsonify({
-                'success': False,
-                'error': 'No authorization token provided'
-            }), 401
-        
-        headers = {
-            'Authorization': auth_header,
-            'Content-Type': 'application/json'
-        }
-        
-        metrics = {}
-        errors = []
-        
-        # 1. Get Asset Count
-        try:
-            assets_response = requests.get(
-                f'{get_api_base()}/api/assetmanagement/v3/assets',
-                headers=headers,
-                params={'size': 1},
-                timeout=30
-            )
-            if assets_response.status_code == 200:
-                assets_data = assets_response.json()
-                metrics['assets'] = {
-                    'count': assets_data.get('page', {}).get('totalElements', 0),
-                    'status': 'success'
-                }
-            else:
-                metrics['assets'] = {'count': 0, 'status': 'error', 'message': f'HTTP {assets_response.status_code}'}
-                errors.append(f'GET {get_api_base()}/api/assetmanagement/v3/assets → HTTP {assets_response.status_code}')
-        except Exception as e:
-            metrics['assets'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {get_api_base()}/api/assetmanagement/v3/assets → {str(e)}')
-        
-        # 2. Get Agent Count from Asset Manager
-        try:
-            agents_response = requests.get(
-                f'{get_api_base()}/api/assetmanagement/v3/assets',
-                headers=headers,
-                params={'filter': '{"hasType":{"in":["core.basicagent"]}}', 'page': 1000000, 'size': 200},
-                timeout=30
-            )
-            if agents_response.status_code == 200:
-                agents_data = agents_response.json()
-                metrics['agents'] = {
-                    'count': agents_data.get('page', {}).get('totalElements', 0),
-                    'status': 'success'
-                }
-            else:
-                metrics['agents'] = {'count': 0, 'status': 'error', 'message': f'HTTP {agents_response.status_code}'}
-                errors.append(f'GET {get_api_base()}/api/assetmanagement/v3/assets?filter={{"hasType":{{"in":["core.basicagent"]}}}} → HTTP {agents_response.status_code}')
-        except Exception as e:
-            metrics['agents'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {get_api_base()}/api/assetmanagement/v3/assets (agents filter) → {str(e)}')
-        
-        # 3. Get Data Lake Objects Count
-        try:
-            datalake_response = requests.get(
-                f'{get_api_base()}/api/datalake/v3/listObjects',
-                headers=headers,
-                params={'path': '/', 'size': 1000},
-                timeout=30
-            )
-            if datalake_response.status_code == 200:
-                datalake_data = datalake_response.json()
-                # API returns: {"objects": {"files": [], "folders": []}}
-                objects_data = datalake_data.get('objects', {})
-                files_count = len(objects_data.get('files', []))
-                folders_count = len(objects_data.get('folders', []))
-                total_objects = files_count + folders_count
-                
-                metrics['datalake'] = {
-                    'objects': total_objects,
-                    'status': 'success'
-                }
-            else:
-                metrics['datalake'] = {'objects': 0, 'status': 'error', 'message': f'HTTP {datalake_response.status_code}'}
-                errors.append(f'GET {get_api_base()}/api/datalake/v3/listObjects?path=/ → HTTP {datalake_response.status_code}')
-        except Exception as e:
-            metrics['datalake'] = {'objects': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {get_api_base()}/api/datalake/v3/listObjects?path=/ → {str(e)}')
-        
-        # 4. Get Event Count
-        try:
-            # API defaults to last 7 days if no timestamp filter provided
-            # Query last 365 days to get all events
-            one_year_ago = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
-            
-            events_response = requests.get(
-                f'{get_api_base()}/api/eventmanagement/v3/events',
-                headers=headers,
-                params={
-                    'size': 1,
-                    'filter': f'{{"timestamp":{{"after":"{one_year_ago}"}}}}',
-                    'history': 'true',  # Include historical events
-                    'includeShared': 'false'  # Only tenant's own events
-                },
-                timeout=30
-            )
-            if events_response.status_code == 200:
-                events_data = events_response.json()
-                # API returns: {"_embedded": {"events": [...]}, "page": {"totalElements": X}}
-                metrics['events'] = {
-                    'count': events_data.get('page', {}).get('totalElements', 0),
-                    'status': 'success'
-                }
-            else:
-                metrics['events'] = {'count': 0, 'status': 'error', 'message': f'HTTP {events_response.status_code}'}
-                errors.append(f'GET {get_api_base()}/api/eventmanagement/v3/events → HTTP {events_response.status_code}')
-        except Exception as e:
-            metrics['events'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {get_api_base()}/api/eventmanagement/v3/events → {str(e)}')
-        
-        # 5. Get VFC Flows Count
-        try:
-            vfc_response = requests.get(
-                f'{get_api_base()}/api/visualflowcreator/v3/flows',
-                headers=headers,
-                params={'size': 1},
-                timeout=30
-            )
-            if vfc_response.status_code == 200:
-                vfc_data = vfc_response.json()
-                metrics['vfc_flows'] = {
-                    'count': vfc_data.get('page', {}).get('totalElements', 0),
-                    'status': 'success'
-                }
-            else:
-                metrics['vfc_flows'] = {'count': 0, 'status': 'error', 'message': f'HTTP {vfc_response.status_code}'}
-                errors.append(f'GET {get_api_base()}/api/visualflowcreator/v3/flows → HTTP {vfc_response.status_code}')
-        except Exception as e:
-            metrics['vfc_flows'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {get_api_base()}/api/visualflowcreator/v3/flows → {str(e)}')
-        
-        # 6. Get Dashboard Count
-        try:
-            dashboards_response = requests.get(
-                f'{get_api_base()}/api/kpidashboardconfiguration/v3/dashboards',
-                headers=headers,
-                params={'size': 1},
-                timeout=30
-            )
-            if dashboards_response.status_code == 200:
-                dashboards_data = dashboards_response.json()
-                metrics['dashboards'] = {
-                    'count': dashboards_data.get('page', {}).get('totalElements', 0),
-                    'status': 'success'
-                }
-            else:
-                metrics['dashboards'] = {'count': 0, 'status': 'error', 'message': f'HTTP {dashboards_response.status_code}'}
-                errors.append(f'GET {get_api_base()}/api/kpidashboardconfiguration/v3/dashboards → HTTP {dashboards_response.status_code}')
-        except Exception as e:
-            metrics['dashboards'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {get_api_base()}/api/kpidashboardconfiguration/v3/dashboards → {str(e)}')
-        
-        # 7. Get Rules Count
-        try:
-            rules_response = requests.get(
-                f'{get_api_base()}/api/rulesmanagement/v4/rules',
-                headers=headers,
-                params={'size': 1},
-                timeout=30
-            )
-            if rules_response.status_code == 200:
-                rules_data = rules_response.json()
-                metrics['rules'] = {
-                    'count': rules_data.get('page', {}).get('totalElements', 0),
-                    'status': 'success'
-                }
-            else:
-                metrics['rules'] = {'count': 0, 'status': 'error', 'message': f'HTTP {rules_response.status_code}'}
-                errors.append(f'GET {get_api_base()}/api/rulesmanagement/v4/rules → HTTP {rules_response.status_code}')
-        except Exception as e:
-            metrics['rules'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {get_api_base()}/api/rulesmanagement/v4/rules → {str(e)}')
-        
-        # 8. Get Cases Count (if available)
-        try:
-            cases_response = requests.get(
-                f'{get_api_base()}/api/casemanagement/v3/cases',
-                headers=headers,
-                params={'size': 1},
-                timeout=30
-            )
-            if cases_response.status_code == 200:
-                cases_data = cases_response.json()
-                metrics['cases'] = {
-                    'count': cases_data.get('totalElements', 0),
-                    'status': 'success'
-                }
-            else:
-                metrics['cases'] = {'count': 0, 'status': 'error', 'message': f'HTTP {cases_response.status_code}'}
-                errors.append(f'GET {get_api_base()}/api/casemanagement/v3/cases → HTTP {cases_response.status_code}')
-        except Exception as e:
-            metrics['cases'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {get_api_base()}/api/casemanagement/v3/cases → {str(e)}')
-        
-        # 9. Get Predictions Count (AI/ML)
-        try:
-            predictions_response = requests.get(
-                f'{get_api_base()}/api/oipredictapi/v3/predict-assets/all',
-                headers=headers,
-                timeout=30
-            )
-            if predictions_response.status_code == 200:
-                predictions_data = predictions_response.json()
-                metrics['predictions'] = {
-                    'count': predictions_data.get('page', {}).get('totalElements', 0),
-                    'status': 'success'
-                }
-            else:
-                metrics['predictions'] = {'count': 0, 'status': 'error', 'message': f'HTTP {predictions_response.status_code}'}
-                errors.append(f'GET {get_api_base()}/api/oipredictapi/v3/predict-assets/all → HTTP {predictions_response.status_code}')
-        except Exception as e:
-            metrics['predictions'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {get_api_base()}/api/oipredictapi/v3/predict-assets/all → {str(e)}')
-        
-        # 10. Get Anomaly Detection Count
-        try:
-            # Note: Using appropriate gateway endpoint based on platform
-            anomaly_response = requests.get(
-                f'{get_api_base()}/api/oipredictapi/v3/usageDetails',
-                headers=headers,
-                params={'requestType': 'ANOMALY'},
-                timeout=30
-            )
-            if anomaly_response.status_code == 200:
-                anomaly_data = anomaly_response.json()
-                metrics['anomaly_detections'] = {
-                    'count': anomaly_data.get('page', {}).get('totalElements', 0),
-                    'status': 'success'
-                }
-            else:
-                metrics['anomaly_detections'] = {'count': 0, 'status': 'error', 'message': f'HTTP {anomaly_response.status_code}'}
-                errors.append(f'GET {get_api_base()}/api/oipredictapi/v3/usageDetails?requestType=ANOMALY → HTTP {anomaly_response.status_code}')
-        except Exception as e:
-            metrics['anomaly_detections'] = {'count': 0, 'status': 'error', 'message': str(e)}
-            errors.append(f'GET {get_api_base()}/api/oipredictapi/v3/usageDetails?requestType=ANOMALY → {str(e)}')
-        
-        return jsonify({
-            'success': True,
-            'metrics': metrics,
-            'errors': errors if errors else None,
-            'timestamp': datetime.now().isoformat()
-        }), 200
-        
+        resp = ih_get(build_api_url('datalake/v3/listObjects'), params={'path': '/', 'size': 1000}, timeout=30)
+        if resp.status_code == 200:
+            objs = resp.json().get('objects', {})
+            metrics['datalake'] = {'objects': len(objs.get('files', [])) + len(objs.get('folders', [])), 'status': 'success'}
+        else:
+            metrics['datalake'] = {'objects': 0, 'status': 'error', 'message': f'HTTP {resp.status_code}'}
+            errors.append(f'datalake → HTTP {resp.status_code}')
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': f'Internal server error: {str(e)}'
-        }), 500
+        metrics['datalake'] = {'objects': 0, 'status': 'error', 'message': str(e)}
+        errors.append(f'datalake → {e}')
+
+    # All other APIs share the same response shape: page.totalElements
+    for key, service_path, params in api_calls:
+        try:
+            resp = ih_get(build_api_url(service_path), params=params, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                # cases uses top-level totalElements; everything else nests under page
+                count = data.get('page', data).get('totalElements', 0)
+                metrics[key] = {'count': count, 'status': 'success'}
+                logger.info('%s count=%s', key, count)
+            else:
+                metrics[key] = {'count': 0, 'status': 'error', 'message': f'HTTP {resp.status_code}'}
+                errors.append(f'{key} → HTTP {resp.status_code}')
+        except Exception as e:
+            logger.exception('%s API call failed: %s', key, e)
+            metrics[key] = {'count': 0, 'status': 'error', 'message': str(e)}
+            errors.append(f'{key} → {e}')
+
+    return jsonify({
+        'success':   True,
+        'metrics':   metrics,
+        'errors':    errors or None,
+        'timestamp': datetime.now().isoformat()
+    }), 200
+
 
 @app.route(f'{BASE_PATH}/api/insights-hub/assets', methods=['GET'])
 @app.route('/api/insights-hub/assets', methods=['GET'])
 def get_insights_hub_assets():
-    """Proxy endpoint to fetch assets from Insights Hub Asset Management API"""
+    """Proxy the IH Asset Management API."""
     try:
-        # Get authorization token from request headers (passed through by gateway)
-        auth_header = request.headers.get('Authorization')
-        # Insights Hub Asset Management API endpoint
-        api_url = f'{get_api_base()}/api/assetmanagement/v3/assets'
-        
-        # Get query parameters (for pagination, filtering, etc.)
-        params = {
-            'size': request.args.get('size', 10),  # Number of assets to return
-            'page': request.args.get('page', 0),    # Page number
-        }
-        
-        # Add filter if provided
+        params = {'size': request.args.get('size', 10), 'page': request.args.get('page', 0)}
         if request.args.get('filter'):
             params['filter'] = request.args.get('filter')
-        
-        # Make request to Insights Hub API
-        headers = {
-            'Authorization': auth_header,
-            'Content-Type': 'application/json'
-        }
-        
-        response = requests.get(api_url, headers=headers, params=params, timeout=30)
-        
-        # Return the response from Insights Hub
-        if response.status_code == 200:
-            return jsonify({
-                'success': True,
-                'data': response.json()
-            }), 200
-        else:
-            return jsonify({
-                'success': False,
-                'error': f'Insights Hub API error: {response.status_code}',
-                'details': response.text
-            }), response.status_code
-            
+
+        resp = ih_get(build_api_url('assetmanagement/v3/assets'), params=params, timeout=30)
+        if resp.status_code == 200:
+            return jsonify({'success': True, 'data': resp.json()}), 200
+
+        return jsonify({'success': False, 'error': f'IH API error: {resp.status_code}', 'details': resp.text}), resp.status_code
+
     except requests.exceptions.Timeout:
-        return jsonify({
-            'success': False,
-            'error': 'Request to Insights Hub timed out'
-        }), 504
-    except requests.exceptions.RequestException as e:
-        return jsonify({
-            'success': False,
-            'error': f'Failed to connect to Insights Hub: {str(e)}'
-        }), 500
+        return jsonify({'success': False, 'error': 'Request to Insights Hub timed out'}), 504
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': f'Internal server error: {str(e)}'
-        }), 500
+        logger.exception('Assets proxy failed: %s', e)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route(f'{BASE_PATH}/api/insights-hub/tenant-info', methods=['GET'])
+@app.route('/api/insights-hub/tenant-info', methods=['GET'])
+def get_tenant_info():
+    return jsonify({
+        'success':                True,
+        'tenant':                 getattr(g, 'user_tenant', IH_HOST_TENANT),
+        'host_tenant':            IH_HOST_TENANT,
+        'app_name':               IH_APP_NAME,
+        'app_version':            IH_APP_VERSION,
+        'api_base':               MINDSPHERE_API_BASE,
+        'credentials_configured': bool(IH_APP_CLIENT_ID and IH_APP_CLIENT_SECRET),
+        'timestamp':              datetime.now().isoformat()
+    }), 200
+
 
 @app.route(f'{BASE_PATH}/api/health', methods=['GET'])
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
+    return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()}), 200
+
+
+# ── Error handlers ────────────────────────────────────────────────────────────
+
+@app.errorhandler(CredentialsMissingError)
+def handle_credentials_missing(e):
+    logger.error('Credentials missing: %s', e)
     return jsonify({
-        'status': 'healthy',
-        'timestamp': datetime.now().isoformat()
-    }), 200
+        'success': False,
+        'error':   str(e),
+        'hint':    'Set IH_APP_CLIENT_ID and IH_APP_CLIENT_SECRET as environment variables.'
+    }), 503
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'error': 'Not found', 'path': request.path}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    logger.exception('Unhandled 500 | path=%s | error=%s', request.path, error)
+    return jsonify({'error': 'Internal server error'}), 500
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

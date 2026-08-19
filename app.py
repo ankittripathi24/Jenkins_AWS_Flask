@@ -326,10 +326,17 @@ app.register_blueprint(bp, url_prefix=BASE_PATH)
 # When BASE_PATH is set, MindSphere / Render may hit bare "/" before the OS Bar
 # rewrites the path. Redirect it to the real prefixed index so the UI always loads.
 if BASE_PATH:
-    from flask import redirect as _redirect
     @app.route('/')
-    def _root_redirect():
-        return _redirect(BASE_PATH + '/', code=302)
+    def _root_index():
+        # MindSphere hits bare "/" — serve the app directly (no redirect).
+        # A 302 redirect is not followed by the MindSphere app loader.
+        try:
+            return render_template('dashboard.html', base_path=BASE_PATH)
+        except Exception as e:
+            logger.exception('Failed to render dashboard at root: %s', e)
+            import traceback
+            return jsonify({'error': 'Failed to render page', 'detail': str(e),
+                            'traceback': traceback.format_exc()}), 500
 # ── MindSphere OS Bar API proxy ───────────────────────────────────────────────
 # The MindSphere OS Bar (main.min.js) makes calls to platform APIs like
 # /api/tenantmanagement/..., /api/im/..., /api/userprofilemanagement/...

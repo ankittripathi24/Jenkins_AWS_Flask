@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, send_from_directory, g
+from flask import Flask, Blueprint, render_template, request, jsonify, send_from_directory, g
 from flask_cors import CORS
 from datetime import datetime, timedelta
 import os
@@ -9,10 +9,8 @@ import sys
 import base64
 import threading
 import time
-
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 CORS(app)
-
 # ── Logging ──────────────────────────────────────────────────────────────────
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
 logger = logging.getLogger('flaskapp')
@@ -21,7 +19,6 @@ if not logger.handlers:
     handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
     logger.addHandler(handler)
 logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
-
 # ── Configuration (all from environment variables) ───────────────────────────
 # Set these before running:
 #   export IH_APP_CLIENT_ID="your-client-id"
@@ -29,34 +26,29 @@ logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
 #   export IH_APP_NAME="flaskapp"
 #   export IH_APP_VERSION="v1.0.1"
 #   export IH_HOST_TENANT="tppnr04"
-#   export BASE_PATH=""          # e.g. "/tppnr04-flaskapp-tppnr04" on MindSphere
+#   export BASE_PATH=""          # e.g. "/tppnr04-flaskapp-tppnr04" on MindSphere / Render
 #   export LOG_LEVEL="INFO"
 #   export PORT="5000"
-
 MINDSPHERE_API_BASE   = os.environ.get('MINDSPHERE_API_BASE',   'https://gateway.eu1.mindsphere.io')
 IH_APP_CLIENT_ID      = os.environ.get('IH_APP_CLIENT_ID',      '')
 IH_APP_CLIENT_SECRET  = os.environ.get('IH_APP_CLIENT_SECRET',  '')
 IH_APP_NAME           = os.environ.get('IH_APP_NAME',           'flaskapp')
 IH_APP_VERSION        = os.environ.get('IH_APP_VERSION',        'v1.0.1')
 IH_HOST_TENANT        = os.environ.get('IH_HOST_TENANT',        '')
-BASE_PATH             = os.environ.get('BASE_PATH',             '').rstrip('/')
-
+# BASE_PATH must start with "/" if set, e.g. "/tppnd04-renderingflask-tppnd04"
+# Leave empty ("") for AWS / local — routes will be registered at "/"
+BASE_PATH             = os.environ.get('BASE_PATH', '').rstrip('/')
 # ── Token cache ───────────────────────────────────────────────────────────────
 _token_lock  = threading.Lock()
 _token_cache: dict = {}   # { user_tenant: { token: str, expires_at: float } }
-
 # ── In-memory submissions store ───────────────────────────────────────────────
 submissions = []
-
 logger.info(
     'App starting | BASE_PATH=%s | API_BASE=%s | LOG_LEVEL=%s | host_tenant=%s | credentials_configured=%s',
     BASE_PATH, MINDSPHERE_API_BASE, LOG_LEVEL, IH_HOST_TENANT,
     bool(IH_APP_CLIENT_ID and IH_APP_CLIENT_SECRET)
 )
-
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
 def mask_secret(value, visible_prefix=10, visible_suffix=10):
     """Mask a sensitive string for safe logging."""
     if not value:
@@ -64,22 +56,15 @@ def mask_secret(value, visible_prefix=10, visible_suffix=10):
     if len(value) <= (visible_prefix + visible_suffix):
         return '***'
     return f'{value[:visible_prefix]}...{value[-visible_suffix:]}'
-
-
 def build_api_url(service_path: str) -> str:
     """Build a full IH API URL from a relative service path.
-    
     Example:
         build_api_url('assetmanagement/v3/assets')
         → 'https://gateway.eu1.mindsphere.io/api/assetmanagement/v3/assets'
     """
     return f'{MINDSPHERE_API_BASE}/api/{service_path}'
-
-
 class CredentialsMissingError(Exception):
     """Raised when IH_APP_CLIENT_ID or IH_APP_CLIENT_SECRET are not set."""
-
-
 def _fetch_app_token(user_tenant: str):
     """Request a fresh Bearer token from the Technical Token Manager."""
     if not IH_APP_CLIENT_ID or not IH_APP_CLIENT_SECRET:
@@ -87,10 +72,8 @@ def _fetch_app_token(user_tenant: str):
             'App credentials not configured. '
             'Set IH_APP_CLIENT_ID and IH_APP_CLIENT_SECRET environment variables.'
         )
-
     b64 = base64.b64encode(f'{IH_APP_CLIENT_ID}:{IH_APP_CLIENT_SECRET}'.encode()).decode()
     url = f'{MINDSPHERE_API_BASE}/api/technicaltokenmanager/v3/oauth/token'
-
     payload = {
         'grant_type':  'client_credentials',
         'appName':     IH_APP_NAME,
@@ -102,21 +85,16 @@ def _fetch_app_token(user_tenant: str):
         'x-space-auth-key': f'Bearer {b64}',
         'Content-Type':     'application/json',
     }
-
     logger.info(
         'Token request | url=%s | appName=%s | appVersion=%s | hostTenant=%s | userTenant=%s',
         url, IH_APP_NAME, IH_APP_VERSION, IH_HOST_TENANT, user_tenant
     )
-
     resp = requests.post(url, json=payload, headers=headers, timeout=15)
     if resp.status_code != 200:
         logger.error('Token fetch failed | status=%s | body=%s', resp.status_code, resp.text[:300])
         resp.raise_for_status()
-
     data = resp.json()
     return data['access_token'], int(data.get('expires_in', 1800))
-
-
 def get_app_token() -> str:
     """Return a valid cached token for the current request's tenant, refreshing when near expiry."""
     user_tenant = getattr(g, 'user_tenant', IH_HOST_TENANT)
@@ -128,19 +106,14 @@ def get_app_token() -> str:
         _token_cache[user_tenant] = {'token': token, 'expires_at': time.time() + expires_in}
         logger.info('Token refreshed | user_tenant=%s | expires_in=%ss', user_tenant, expires_in)
         return token
-
-
 def ih_get(url: str, **kwargs):
     """Authenticated GET against the IH API. Retries once on 401 with a fresh token."""
     user_tenant = getattr(g, 'user_tenant', IH_HOST_TENANT)
     logger.info('ih_get | url=%s | params=%s | user_tenant=%s', url, kwargs.get('params', {}), user_tenant)
-
     token = get_app_token()
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}
-
     resp = requests.get(url, headers=headers, **kwargs)
     logger.info('ih_get response | status=%s | url=%s', resp.status_code, url)
-
     if resp.status_code == 401:
         logger.warning('Got 401 — refreshing token for tenant=%s and retrying | url=%s', user_tenant, url)
         with _token_lock:
@@ -149,25 +122,18 @@ def ih_get(url: str, **kwargs):
         headers['Authorization'] = f'Bearer {token}'
         resp = requests.get(url, headers=headers, **kwargs)
         logger.info('ih_get retry | status=%s | url=%s', resp.status_code, url)
-
     if resp.status_code not in (200, 201, 204):
         logger.warning('ih_get non-success | status=%s | body=%s', resp.status_code, resp.text[:300])
-
     return resp
-
-
 # ── Request interceptor ───────────────────────────────────────────────────────
-
 @app.before_request
 def set_request_context():
     """Resolve user_tenant and base_path for every incoming request."""
-
     # Tenant: prefer the gateway-injected header, fall back to host tenant
     ms_tenant_header = request.headers.get('X-MindSphere-Tenant')
     forwarded_host   = request.headers.get('X-Forwarded-Host', '')
     subdomain        = forwarded_host.split('.')[0] if forwarded_host else ''
     app_separator    = f'-{IH_APP_NAME}-'
-
     if ms_tenant_header:
         g.user_tenant = ms_tenant_header
     elif app_separator in subdomain:
@@ -175,71 +141,65 @@ def set_request_context():
         g.user_tenant = subdomain.split(app_separator)[0]
     else:
         g.user_tenant = IH_HOST_TENANT
-
     # Base path: derive from X-Forwarded-Host when deployed, use env var locally
     if forwarded_host:
         g.base_path = f'/{subdomain}'
     else:
         g.base_path = BASE_PATH
-
     logger.info(
         'Request | method=%s | path=%s | user_tenant=%s | base_path=%s | remote_ip=%s',
         request.method, request.path, g.user_tenant, g.base_path, request.remote_addr
     )
-
     # Skip verbose header logging for ELB health checks
     if 'ELB-HealthChecker' in request.headers.get('User-Agent', ''):
         return
-
     for header, value in request.headers:
         if header.lower() in ('authorization', 'cookie', 'x-xsrf-token'):
             logger.debug('Header %s=***masked***', header)
         else:
             logger.debug('Header %s=%s', header, value)
-
-
+# ── Blueprint ─────────────────────────────────────────────────────────────────
+# All routes are defined on this blueprint.
+#
+# When BASE_PATH is set  (Render / MindSphere):
+#   url_prefix="/tppnd04-renderingflask-tppnd04"
+#   → Flask matches /tppnd04-renderingflask-tppnd04/api/...
+#
+# When BASE_PATH is empty (AWS / local):
+#   url_prefix=""
+#   → Flask matches /api/...  (no change from original behaviour)
+#
+# No duplicate @app.route decorators needed — one definition covers all envs.
+bp = Blueprint('main', __name__)
 # ── Page routes ───────────────────────────────────────────────────────────────
-
-@app.route(f'{BASE_PATH}/')
-@app.route('/')
+@bp.route('/')
 def index():
     try:
         return render_template('dashboard.html', base_path=BASE_PATH)
     except Exception as e:
         logger.exception('Failed to render dashboard: %s', e)
         return jsonify({'error': 'Failed to render page'}), 500
-
-
-@app.route(f'{BASE_PATH}/app-info.json')
-@app.route('/app-info.json')
+@bp.route('/app-info.json')
 def app_info():
     try:
         return send_from_directory(app.static_folder, 'app-info.json')
     except Exception as e:
         logger.exception('Failed to serve app-info.json: %s', e)
         return jsonify({'error': 'File not found'}), 404
-
-
-@app.route(f'{BASE_PATH}/text-submission')
-@app.route('/text-submission')
+@bp.route('/text-submission')
 def text_submission():
     try:
         return render_template('index.html', base_path=BASE_PATH)
     except Exception as e:
         logger.exception('Failed to render text submission page: %s', e)
         return jsonify({'error': 'Failed to render page'}), 500
-
-
 # ── Submission API ────────────────────────────────────────────────────────────
-
-@app.route(f'{BASE_PATH}/api/submit', methods=['POST'])
-@app.route('/api/submit', methods=['POST'])
+@bp.route('/api/submit', methods=['POST'])
 def submit_text():
     try:
         data = request.get_json()
         if not data or 'name' not in data or 'text' not in data:
             return jsonify({'success': False, 'error': 'Missing required fields: name and text'}), 400
-
         submission = {
             'id':        len(submissions) + 1,
             'name':      data['name'],
@@ -249,36 +209,24 @@ def submit_text():
         submissions.append(submission)
         logger.info('Submission stored | id=%s | total=%s', submission['id'], len(submissions))
         return jsonify({'success': True, 'message': 'Text submitted successfully', 'submission': submission}), 201
-
     except Exception as e:
         logger.exception('Submit endpoint failed: %s', e)
         return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route(f'{BASE_PATH}/api/submissions', methods=['GET'])
-@app.route('/api/submissions', methods=['GET'])
+@bp.route('/api/submissions', methods=['GET'])
 def get_submissions():
     return jsonify({'success': True, 'count': len(submissions), 'submissions': submissions}), 200
-
-
-@app.route(f'{BASE_PATH}/api/submissions/<int:submission_id>', methods=['GET'])
-@app.route('/api/submissions/<int:submission_id>', methods=['GET'])
+@bp.route('/api/submissions/<int:submission_id>', methods=['GET'])
 def get_submission(submission_id):
     submission = next((s for s in submissions if s['id'] == submission_id), None)
     if submission:
         return jsonify({'success': True, 'submission': submission}), 200
     return jsonify({'success': False, 'error': 'Submission not found'}), 404
-
-
 # ── Insights Hub API routes ───────────────────────────────────────────────────
-
-@app.route(f'{BASE_PATH}/api/insights-hub/dashboard-metrics', methods=['GET'])
-@app.route('/api/insights-hub/dashboard-metrics', methods=['GET'])
+@bp.route('/api/insights-hub/dashboard-metrics', methods=['GET'])
 def get_dashboard_metrics():
     """Call 10 IH APIs and return counts for the dashboard."""
     metrics = {}
     errors  = []
-
     # Each entry: (metrics_key, service_path, params)
     api_calls = [
         ('assets',             'assetmanagement/v3/assets',              {'size': 1}),
@@ -290,7 +238,6 @@ def get_dashboard_metrics():
         ('predictions',        'oipredictapi/v3/predict-assets/all',     {}),
         ('anomaly_detections', 'oipredictapi/v3/usageDetails',           {'requestType': 'ANOMALY'}),
     ]
-
     # Events needs a dynamic timestamp — handle separately
     one_year_ago = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
     api_calls.append((
@@ -298,7 +245,6 @@ def get_dashboard_metrics():
         'eventmanagement/v3/events',
         {'size': 1, 'filter': f'{{"timestamp":{{"after":"{one_year_ago}"}}}}', 'history': 'true', 'includeShared': 'false'}
     ))
-
     # Data lake is also slightly different (different response shape) — handle separately
     try:
         resp = ih_get(build_api_url('datalake/v3/listObjects'), params={'path': '/', 'size': 1000}, timeout=30)
@@ -311,7 +257,6 @@ def get_dashboard_metrics():
     except Exception as e:
         metrics['datalake'] = {'objects': 0, 'status': 'error', 'message': str(e)}
         errors.append(f'datalake → {e}')
-
     # All other APIs share the same response shape: page.totalElements
     for key, service_path, params in api_calls:
         try:
@@ -329,39 +274,29 @@ def get_dashboard_metrics():
             logger.exception('%s API call failed: %s', key, e)
             metrics[key] = {'count': 0, 'status': 'error', 'message': str(e)}
             errors.append(f'{key} → {e}')
-
     return jsonify({
         'success':   True,
         'metrics':   metrics,
         'errors':    errors or None,
         'timestamp': datetime.now().isoformat()
     }), 200
-
-
-@app.route(f'{BASE_PATH}/api/insights-hub/assets', methods=['GET'])
-@app.route('/api/insights-hub/assets', methods=['GET'])
+@bp.route('/api/insights-hub/assets', methods=['GET'])
 def get_insights_hub_assets():
     """Proxy the IH Asset Management API."""
     try:
         params = {'size': request.args.get('size', 10), 'page': request.args.get('page', 0)}
         if request.args.get('filter'):
             params['filter'] = request.args.get('filter')
-
         resp = ih_get(build_api_url('assetmanagement/v3/assets'), params=params, timeout=30)
         if resp.status_code == 200:
             return jsonify({'success': True, 'data': resp.json()}), 200
-
         return jsonify({'success': False, 'error': f'IH API error: {resp.status_code}', 'details': resp.text}), resp.status_code
-
     except requests.exceptions.Timeout:
         return jsonify({'success': False, 'error': 'Request to Insights Hub timed out'}), 504
     except Exception as e:
         logger.exception('Assets proxy failed: %s', e)
         return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route(f'{BASE_PATH}/api/insights-hub/tenant-info', methods=['GET'])
-@app.route('/api/insights-hub/tenant-info', methods=['GET'])
+@bp.route('/api/insights-hub/tenant-info', methods=['GET'])
 def get_tenant_info():
     return jsonify({
         'success':                True,
@@ -373,16 +308,15 @@ def get_tenant_info():
         'credentials_configured': bool(IH_APP_CLIENT_ID and IH_APP_CLIENT_SECRET),
         'timestamp':              datetime.now().isoformat()
     }), 200
-
-
-@app.route(f'{BASE_PATH}/api/health', methods=['GET'])
-@app.route('/api/health', methods=['GET'])
+@bp.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()}), 200
-
-
+# ── Register Blueprint ────────────────────────────────────────────────────────
+# BASE_PATH=""  → prefix=""  → routes at /api/...                    (AWS / local)
+# BASE_PATH="/tppnd04-renderingflask-tppnd04"
+#             → routes at /tppnd04-renderingflask-tppnd04/api/...    (Render / MindSphere)
+app.register_blueprint(bp, url_prefix=BASE_PATH)
 # ── Error handlers ────────────────────────────────────────────────────────────
-
 @app.errorhandler(CredentialsMissingError)
 def handle_credentials_missing(e):
     logger.error('Credentials missing: %s', e)
@@ -391,19 +325,14 @@ def handle_credentials_missing(e):
         'error':   str(e),
         'hint':    'Set IH_APP_CLIENT_ID and IH_APP_CLIENT_SECRET as environment variables.'
     }), 503
-
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({'error': 'Not found', 'path': request.path}), 404
-
 @app.errorhandler(500)
 def internal_error(error):
     logger.exception('Unhandled 500 | path=%s | error=%s', request.path, error)
     return jsonify({'error': 'Internal server error'}), 500
-
-
 # ── Entry point ───────────────────────────────────────────────────────────────
-
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
